@@ -1,0 +1,9 @@
+name = "pdf-ocr-backend"
+main = "src/index.ts"
+compatibility_date = "2023-12-01"
+
+[vars]
+# GEMINI_API_KEY will be set via wrangler secret put or in .dev.vars for local dev
+
+[placement]
+mode = "smart"
