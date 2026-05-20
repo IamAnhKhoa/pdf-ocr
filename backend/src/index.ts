@@ -170,7 +170,8 @@ async function callGroq(images: string[], model: string, apiKey: string): Promis
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
+      'Authorization': `Bearer ${apiKey}`,
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     },
     body: JSON.stringify({
       model: targetModel,
@@ -461,7 +462,10 @@ export default {
         }
         const resp = await fetch('https://api.groq.com/openai/v1/models', {
           method: 'GET',
-          headers: { 'Authorization': `Bearer ${groqKey}` }
+          headers: { 
+            'Authorization': `Bearer ${groqKey}`,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          }
         });
         const latency = Date.now() - groqStartTime;
         if (resp.ok) {

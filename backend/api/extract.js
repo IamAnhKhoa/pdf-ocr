@@ -166,7 +166,8 @@ async function callGroq(images, model, apiKey) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
+      'Authorization': `Bearer ${apiKey}`,
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     },
     body: JSON.stringify({
       model: targetModel,
@@ -392,7 +393,11 @@ export default async function handler(request) {
       const groqKey = process.env.GROQ_API_KEY || HARDCODED_GROQ_KEY;
       const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${groqKey}` },
+        headers: { 
+          'Content-Type': 'application/json', 
+          'Authorization': `Bearer ${groqKey}`,
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        },
         body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: 'hi' }], max_tokens: 5 })
       });
       const latency = Date.now() - groqStartTime;
