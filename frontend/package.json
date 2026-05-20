@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",
+    "exceljs": "^4.4.0",
     "lucide-react": "^1.16.0",
     "pdfjs-dist": "^5.7.284",
     "react": "^19.2.6",

@@ -7,3 +7,8 @@ compatibility_date = "2023-12-01"
 
 [placement]
 mode = "smart"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pdf-ocr-db"
+database_id = "a8a0473b-0f07-436f-8a24-9dc5818296f8"
