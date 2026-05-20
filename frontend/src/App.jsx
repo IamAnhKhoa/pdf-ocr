@@ -1290,51 +1290,71 @@ function App() {
 
               {quotaResults && !quotaResults.error && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 fade-in">
-                  {quotaResults.results?.map((r, i) => (
-                    <div
-                      key={i}
-                      className={`flex items-center gap-2.5 px-4 py-3.5 rounded-xl border text-xs font-semibold ${
-                        r.status === 'ok'
-                          ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800'
-                          : r.status === 'quota'
-                          ? 'bg-amber-50/50 border-amber-100 text-amber-800'
-                          : 'bg-rose-50/50 border-rose-100 text-rose-800'
-                      }`}
-                    >
-                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${
-                        r.status === 'ok' ? 'bg-emerald-500' : r.status === 'quota' ? 'bg-amber-500' : 'bg-rose-500'
-                      }`} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-extrabold text-slate-800 truncate">{r.name}</span>
-                          {r.latency !== undefined && (
-                            <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono shrink-0 ${
-                              r.latency < 500
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : r.latency < 1200
-                                ? 'bg-amber-100 text-amber-800'
-                                : 'bg-rose-100 text-rose-800'
+                  {quotaResults.results?.map((r, i) => {
+                    const isGeoBlock = r.message?.toLowerCase().includes('location') || r.details?.toLowerCase().includes('location');
+                    const isGroqForbidden = r.provider === 'groq' && (r.message?.toLowerCase().includes('forbidden') || r.details?.toLowerCase().includes('403'));
+                    
+                    let statusClass = 'bg-rose-50/50 border-rose-100 text-rose-800';
+                    let dotClass = 'bg-rose-500';
+                    let displayMessage = r.message;
+                    let displayResetInfo = r.resetInfo;
+                    
+                    if (r.status === 'ok') {
+                      statusClass = 'bg-emerald-50/50 border-emerald-100 text-emerald-800';
+                      dotClass = 'bg-emerald-500';
+                    } else if (r.status === 'quota') {
+                      statusClass = 'bg-amber-50/50 border-amber-100 text-amber-800';
+                      dotClass = 'bg-amber-500';
+                    } else if (isGeoBlock) {
+                      statusClass = 'bg-amber-50/50 border-amber-100 text-amber-850';
+                      dotClass = 'bg-amber-500';
+                      displayMessage = 'IP Edge bị Google giới hạn địa lý';
+                      displayResetInfo = 'Hệ thống tự động chuyển tiếp qua OpenRouter miễn phí';
+                    } else if (isGroqForbidden) {
+                      statusClass = 'bg-amber-50/50 border-amber-100 text-amber-850';
+                      dotClass = 'bg-amber-500';
+                      displayMessage = 'IP Edge bị chặn. Sẽ tự động chuyển tiếp';
+                      displayResetInfo = 'Hệ thống tự động chuyển tiếp qua OpenRouter/Llama';
+                    }
+
+                    return (
+                      <div
+                        key={i}
+                        className={`flex items-center gap-2.5 px-4 py-3.5 rounded-xl border text-xs font-semibold ${statusClass}`}
+                      >
+                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${dotClass}`} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-extrabold text-slate-800 truncate">{r.name}</span>
+                            {r.latency !== undefined && (
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono shrink-0 ${
+                                r.latency < 500
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : r.latency < 1200
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-rose-100 text-rose-800'
+                              }`}>
+                                ⚡ {r.latency}ms
+                              </span>
+                            )}
+                          </div>
+                          <div className="font-bold text-slate-500 mt-1 truncate">{displayMessage}</div>
+                          {displayResetInfo && (
+                            <div className={`text-[10px] font-semibold mt-1 ${
+                              r.status === 'ok' ? 'text-slate-400' : 'text-amber-700 font-bold'
                             }`}>
-                              ⚡ {r.latency}ms
-                            </span>
+                              ⏱ {displayResetInfo}
+                            </div>
+                          )}
+                          {r.details && (
+                            <div className="text-[9px] text-slate-400 font-normal mt-1 border-t border-slate-100/50 pt-1 font-mono truncate">
+                              ⚙ {r.details}
+                            </div>
                           )}
                         </div>
-                        <div className="font-bold text-slate-500 mt-1 truncate">{r.message}</div>
-                        {r.resetInfo && (
-                          <div className={`text-[10px] font-semibold mt-1 ${
-                            r.status === 'ok' ? 'text-slate-400' : r.status === 'quota' ? 'text-amber-700 font-bold' : 'text-rose-600'
-                          }`}>
-                            ⏱ {r.resetInfo}
-                          </div>
-                        )}
-                        {r.details && (
-                          <div className="text-[9px] text-slate-400 font-normal mt-1 border-t border-slate-100/50 pt-1 font-mono truncate">
-                            ⚙ {r.details}
-                          </div>
-                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   <div className="col-span-full space-y-2 pt-2 border-t border-slate-100/60">
                     <div className="text-[10px] text-slate-400 font-medium">
                       Kiểm tra lúc: {new Date(quotaResults.checkedAt).toLocaleTimeString('vi-VN')}
