@@ -420,7 +420,7 @@ function App() {
       <div className="max-w-6xl mx-auto space-y-6">
         
         {/* Header Section (Thiết kế phong cách CRM trắng đẹp, hiện đại 2026) */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="flex items-center gap-4 text-left">
             {/* Biểu tượng tệp tin thiết kế phẳng sang trọng */}
             <div className="w-12 h-12 bg-blue-600/10 text-blue-600 rounded-xl flex items-center justify-center shrink-0 font-bold text-xl">
@@ -436,12 +436,34 @@ function App() {
             </div>
           </div>
           
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
+            {/* Tab Menu Navigation (Premium Pill style) */}
+            <div className="flex border border-slate-200/60 bg-slate-50 p-1 rounded-xl shadow-xs">
+              {[
+                { id: 'ocr', label: '📄 Trích Xuất' },
+                { id: 'stats', label: '📊 Thống Kê' },
+                { id: 'config', label: '⚙️ Cấu Hình' }
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  id={`tab-${tab.id}`}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`py-2 px-3 md:px-4 rounded-lg text-xs md:text-sm font-extrabold transition-all text-center whitespace-nowrap ${
+                    activeTab === tab.id
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100/50'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
             <button
               id="btn-export-excel"
               onClick={exportToExcel}
               disabled={dataList.length === 0}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-xs md:text-sm transition-all shadow-sm ${
+              className={`flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs md:text-sm transition-all shadow-sm ${
                 dataList.length === 0 
                   ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed' 
                   : 'bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-600'
@@ -450,28 +472,6 @@ function App() {
               📥 Xuất Excel
             </button>
           </div>
-        </div>
-
-        {/* Tab Menu Navigation (Premium Pill style) */}
-        <div className="flex border border-slate-200/60 bg-white p-1 rounded-xl shadow-xs max-w-lg">
-          {[
-            { id: 'ocr', label: '📄 Trích Xuất OCR' },
-            { id: 'stats', label: '📊 Thống Kê Hệ Thống' },
-            { id: 'config', label: '⚙️ Cấu Hình & Quota' }
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              id={`tab-${tab.id}`}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 py-2 px-4 rounded-lg text-xs md:text-sm font-extrabold transition-all text-center ${
-                activeTab === tab.id
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
         </div>
 
         {/* OCR TAB */}

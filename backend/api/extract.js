@@ -2,13 +2,17 @@ export const config = {
   runtime: 'edge',
 };
 
-const GEMINI_KEYS = [
-  "REDACTED_GEMINI_KEY",
-  "REDACTED_GEMINI_KEY",
-  "REDACTED_GEMINI_KEY",
-  "REDACTED_GEMINI_KEY",
-  "REDACTED_GEMINI_KEY"
-];
+function getGeminiKeys() {
+  const keys = [];
+  if (process.env.GEMINI_API_KEY) {
+    keys.push(process.env.GEMINI_API_KEY);
+  }
+  if (process.env.GEMINI_KEYS) {
+    const list = process.env.GEMINI_KEYS.split(',').map(k => k.trim()).filter(Boolean);
+    keys.push(...list);
+  }
+  return [...new Set(keys)];
+}
 
 const HARDCODED_OPENROUTER_KEY = "";
 const HARDCODED_GROQ_KEY = "";
@@ -236,8 +240,7 @@ export default async function handler(request) {
       { id: 'gemini-2.5-flash-lite', name: '2.5 Flash Lite', limit: '10 RPM · 20 RPD · 250K TPM' }
     ];
 
-    const geminiKeysAll = [...GEMINI_KEYS];
-    if (process.env.GEMINI_API_KEY) geminiKeysAll.unshift(process.env.GEMINI_API_KEY);
+    const geminiKeysAll = getGeminiKeys();
 
     for (let i = 0; i < geminiKeysAll.length; i++) {
       const key = geminiKeysAll[i];
@@ -466,10 +469,7 @@ export default async function handler(request) {
     let textResponse = '';
 
     // Tự chuẩn bị tập hợp các key Gemini cần thử
-    let geminiKeysToTry = [...GEMINI_KEYS];
-    if (process.env.GEMINI_API_KEY) {
-      geminiKeysToTry.unshift(process.env.GEMINI_API_KEY);
-    }
+    let geminiKeysToTry = getGeminiKeys();
 
     // Danh sách các nhà cung cấp/mô hình sẽ quay vòng thử nếu lỗi
     const providersToTry = [];
