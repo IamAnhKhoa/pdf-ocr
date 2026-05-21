@@ -1033,41 +1033,7 @@ function App() {
                 color="orange" 
                 valueText={stats.total > 0 ? `${stats.completed + stats.processing}/${stats.total} tệp` : "Trống"} 
                 description="Tỷ lệ tệp đang/đã hoàn tất xử lý"
-              >
-                <div className="mt-4 pt-3 border-t border-[#16253b] flex flex-col h-[150px]">
-                  {dataList.length === 0 ? (
-                    <div className="space-y-2 overflow-y-auto flex-1 pr-1 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
-                      <div className="h-full flex items-center justify-center text-xs text-slate-500 font-semibold py-8">
-                        Hàng đợi trống
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-1.5 overflow-y-auto flex-1 pr-1 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent text-left">
-                      {dataList.map((item) => (
-                        <div key={item.id} className="flex items-center justify-between gap-2 p-1.5 bg-[#09101c]/30 rounded-lg border border-[#16253b] hover:border-slate-800/80 transition-colors">
-                          <span className="text-[11px] font-bold text-slate-300 truncate max-w-[130px]" title={item.fileName}>
-                            {item.fileName}
-                          </span>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {item.status === 'completed' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
-                            {item.status === 'failed' && <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />}
-                            {item.status === 'processing' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />}
-                            {item.status === 'waiting_retry' && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />}
-                            {item.status === 'pending' && <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />}
-                            <span className="text-[9px] uppercase font-extrabold text-slate-500">
-                              {item.status === 'completed' && 'Xong'}
-                              {item.status === 'failed' && 'Lỗi'}
-                              {item.status === 'processing' && 'Xử lý'}
-                              {item.status === 'waiting_retry' && 'Thử lại'}
-                              {item.status === 'pending' && 'Chờ'}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </QuotaGauge>
+              />
               <QuotaGauge 
                 title="Tỷ Lệ Lỗi (Thất Bại)" 
                 percentage={stats.total > 0 ? Math.round((stats.failed / stats.total) * 100) : 0} 
