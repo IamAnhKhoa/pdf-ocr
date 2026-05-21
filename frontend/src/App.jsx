@@ -1027,13 +1027,7 @@ function App() {
                 valueText={stats.total > 0 ? `${stats.completed}/${stats.total} tệp` : "0 tệp"} 
                 description="Tỷ lệ tệp PDF đã hoàn tất đọc OCR thành công"
               />
-              <QuotaGauge 
-                title="Processing Queue" 
-                percentage={stats.total > 0 ? Math.round(((stats.completed + stats.processing) / stats.total) * 100) : 0} 
-                color="orange" 
-                valueText={stats.total > 0 ? `${stats.completed + stats.processing}/${stats.total} tệp` : "Trống"} 
-                description="Tỷ lệ tệp đang/đã hoàn tất xử lý"
-              />
+
               <QuotaGauge 
                 title="Tỷ Lệ Lỗi (Thất Bại)" 
                 percentage={stats.total > 0 ? Math.round((stats.failed / stats.total) * 100) : 0} 
