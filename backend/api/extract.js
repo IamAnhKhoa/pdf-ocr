@@ -20,7 +20,7 @@ const HARDCODED_GROQ_KEY = "";
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key, X-Gemini-Keys, X-Openrouter-Key, X-Groq-Key',
 };
 
 const promptText = `Bạn là một trợ lý ảo chuyên trích xuất thông tin từ văn bản scan. 
@@ -473,8 +473,20 @@ export default async function handler(request) {
     let targetModel = model;
     let textResponse = '';
 
-    // Tự chuẩn bị tập hợp các key Gemini cần thử
-    let geminiKeysToTry = getGeminiKeys();
+    // Nhận keys từ header nếu được gọi bởi Cloudflare Worker proxy
+    const headerGeminiKeys = request.headers.get('X-Gemini-Keys');
+    const headerOpenrouterKey = request.headers.get('X-Openrouter-Key');
+    const headerGroqKey = request.headers.get('X-Groq-Key');
+
+    // Tự chuẩn bị tập hợp các key Gemini cần thử (ưu tiên keys từ header)
+    let geminiKeysToTry;
+    if (headerGeminiKeys) {
+      const headerKeys = headerGeminiKeys.split(',').map(k => k.trim()).filter(Boolean);
+      const envKeys = getGeminiKeys();
+      geminiKeysToTry = [...new Set([...headerKeys, ...envKeys])];
+    } else {
+      geminiKeysToTry = getGeminiKeys();
+    }
 
     // Danh sách các nhà cung cấp/mô hình sẽ quay vòng thử nếu lỗi
     const providersToTry = [];
@@ -519,9 +531,9 @@ export default async function handler(request) {
         if (prov.name === 'gemini') {
           textResponse = await tryGeminiWithKeyRotation(images, prov.model, geminiKeysToTry);
         } else if (prov.name === 'openrouter') {
-          textResponse = await callOpenRouter(images, prov.model, process.env.OPENROUTER_API_KEY);
+          textResponse = await callOpenRouter(images, prov.model, headerOpenrouterKey || process.env.OPENROUTER_API_KEY);
         } else if (prov.name === 'groq') {
-          const groqKey = process.env.GROQ_API_KEY || HARDCODED_GROQ_KEY;
+          const groqKey = headerGroqKey || process.env.GROQ_API_KEY || HARDCODED_GROQ_KEY;
           if (!groqKey) {
             throw new Error("Thiếu API Key cho Groq.");
           }

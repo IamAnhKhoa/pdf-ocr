@@ -3,6 +3,7 @@ export interface Env {
   GEMINI_KEYS?: string;
   GROQ_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
+  VERCEL_PROXY_URL?: string; // URL Vercel backend để proxy khi Edge bị chặn địa lý
   DB?: any;
 }
 
@@ -42,6 +43,35 @@ Vui lòng trích xuất các thông tin sau và trả về DUY NHẤT một JSON
 }
 Nếu không tìm thấy thông tin nào, hãy để chuỗi rỗng "".`;
 
+// Gọi OCR qua Vercel proxy để bypass lỗi IP địa lý của Cloudflare Edge
+async function callViaVercelProxy(images: string[], model: string, provider: string, vercelUrl: string, env: Env): Promise<string> {
+  const proxyEndpoint = `${vercelUrl}/api/extract`;
+  console.log(`Proxy OCR qua Vercel: ${proxyEndpoint}`);
+
+  // Gửi toàn bộ keys vào header để Vercel xử lý xoay vòng key
+  const geminiKeys = getGeminiKeys(env).join(',');
+
+  const resp = await fetch(proxyEndpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Gemini-Keys': geminiKeys,
+      'X-Openrouter-Key': env.OPENROUTER_API_KEY || '',
+      'X-Groq-Key': env.GROQ_API_KEY || '',
+      'User-Agent': 'Mozilla/5.0 (compatible; pdf-ocr-worker/1.0)'
+    },
+    body: JSON.stringify({ images, model, provider })
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`Vercel proxy error: ${resp.status} ${errText}`);
+  }
+
+  const data = await resp.text();
+  return data; // Vercel trả về JSON string trực tiếp
+}
+
 async function tryGeminiWithKeyRotation(images: string[], model: string, keysToTry: string[]): Promise<string> {
   let lastError: any = null;
   const targetModel = model || 'gemini-2.5-flash';
@@ -72,6 +102,10 @@ async function tryGeminiWithKeyRotation(images: string[], model: string, keysToT
 
       if (!geminiResponse.ok) {
         const errorText = await geminiResponse.text();
+        // Nếu lỗi địa lý → ném error đặc biệt để caller biết cần dùng proxy
+        if (errorText.includes('location') || errorText.includes('USER_LOCATION')) {
+          throw new Error(`GEO_BLOCK:Gemini Key ${i + 1}: ${errorText}`);
+        }
         throw new Error(`Gemini API Key ${i + 1} failed: ${geminiResponse.status} ${errorText}`);
       }
 
@@ -576,11 +610,46 @@ export default {
       let lastError: any = null;
       let successProvider = '';
       let successModel = '';
+      const vercelProxyUrl = env.VERCEL_PROXY_URL || 'https://backend-alpha-rose-53.vercel.app';
+
       for (const prov of providersToTry) {
         try {
           console.log(`Đang chạy luồng nhận dạng bằng ${prov.name} (${prov.model})...`);
           if (prov.name === 'gemini') {
-            textResponse = await tryGeminiWithKeyRotation(images, prov.model, geminiKeysToTry);
+            try {
+              textResponse = await tryGeminiWithKeyRotation(images, prov.model, geminiKeysToTry);
+            } catch (geminiErr: any) {
+              // Nếu tất cả key Gemini bị lỗi địa lý → thử qua Vercel proxy
+              if (geminiErr.message?.includes('GEO_BLOCK') || geminiErr.message?.includes('location')) {
+                console.log('Phát hiện lỗi địa lý Gemini. Chuyển sang Vercel proxy...');
+                const proxyResult = await callViaVercelProxy(images, prov.model, 'gemini', vercelProxyUrl, env);
+                // Vercel trả về JSON text, parse để lấy text field hoặc dùng trực tiếp
+                try {
+                  const parsed = JSON.parse(proxyResult);
+                  // Nếu là JSON kết quả hợp lệ (có ít nhất 1 trường OCR) thì dùng luôn
+                  if (parsed.soDen !== undefined || parsed.soKyHieu !== undefined || parsed.noiDung !== undefined) {
+                    successProvider = 'gemini-via-vercel';
+                    successModel = prov.model;
+                    // Gắn thông tin provider
+                    parsed.usedProvider = 'gemini-via-vercel';
+                    parsed.usedModel = prov.model;
+                    // Lưu stats và trả về ngay
+                    await incrementStats(env.DB, true, images.length);
+                    return new Response(JSON.stringify(parsed), {
+                      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+                    });
+                  }
+                  // Nếu Vercel trả về dạng {candidates: [...]} raw Gemini
+                  const candidates = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+                  if (candidates) textResponse = candidates;
+                  else textResponse = proxyResult;
+                } catch {
+                  textResponse = proxyResult;
+                }
+              } else {
+                throw geminiErr;
+              }
+            }
           } else if (prov.name === 'openrouter') {
             textResponse = await callOpenRouter(images, prov.model, env.OPENROUTER_API_KEY);
           } else if (prov.name === 'groq') {
