@@ -2,8 +2,99 @@ import { useState, useEffect, Fragment } from 'react';
 import ExcelJS from 'exceljs';
 import { extractFirstAndLastPage } from './utils/pdfProcessor';
 
+// Hàm hỗ trợ định dạng ngày giờ dạng DD/MM/YYYY hh:mm AM/PM
+const formatDate = (date) => {
+  const d = new Date(date);
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  let hours = d.getHours();
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12; // the hour '0' should be '12'
+  const hoursStr = String(hours).padStart(2, '0');
+  return `${day}/${month}/${year} ${hoursStr}:${minutes} ${ampm}`;
+};
+
+// Component hiển thị đồng hồ thống kê (Stats Gauge)
+function QuotaGauge({ title, percentage, color, valueText, description }) {
+  const maxArcLength = 179.0;
+  const strokeDashoffset = maxArcLength - (maxArcLength * percentage / 100);
+  
+  let dotColor = 'bg-blue-500';
+  if (color === 'green') dotColor = 'bg-emerald-500';
+  if (color === 'orange') dotColor = 'bg-amber-500';
+  if (color === 'red') dotColor = 'bg-rose-500';
+
+  let strokeColor = '#3b82f6';
+  if (color === 'green') strokeColor = '#10b981';
+  if (color === 'orange') strokeColor = '#f59e0b';
+  if (color === 'red') strokeColor = '#ef4444';
+
+  return (
+    <div className="bg-[#0d1726]/60 backdrop-blur-xl border border-[#16253b] rounded-2xl p-5 shadow-lg flex flex-col justify-between hover:border-[#00c2ff]/30 transition-all duration-300">
+      <div>
+        <span className="text-slate-400 font-bold text-xs text-left block w-full mb-0.5">{title}</span>
+        {description && <span className="text-[10px] text-slate-500 block text-left mb-2">{description}</span>}
+      </div>
+      
+      {/* Circle Gauge */}
+      <div className="relative w-36 h-36 flex items-center justify-center mx-auto my-2">
+        <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+          {/* Background track (270 degrees) */}
+          <circle
+            cx="50"
+            cy="50"
+            r="38"
+            fill="none"
+            stroke="#16253b"
+            strokeWidth="7.5"
+            strokeDasharray="179 60"
+            strokeLinecap="round"
+            transform="rotate(135 50 50)"
+          />
+          {/* Active track (270 degrees) */}
+          <circle
+            cx="50"
+            cy="50"
+            r="38"
+            fill="none"
+            stroke={strokeColor}
+            strokeWidth="7.5"
+            strokeDasharray="179 60"
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+            transform="rotate(135 50 50)"
+            className="transition-all duration-1000 ease-out"
+          />
+        </svg>
+        {/* Center Text */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-3xl font-black text-white tracking-tight">{percentage}%</span>
+          <span className="text-[10px] font-bold text-slate-450 mt-1 uppercase tracking-wider">{valueText}</span>
+        </div>
+      </div>
+
+      {/* Mini progress bar */}
+      <div className="w-full mt-2">
+        <div className="w-full h-1 bg-[#16253b] rounded-full overflow-hidden">
+          <div 
+            className="h-full rounded-full transition-all duration-1000 ease-out"
+            style={{ 
+              width: `${percentage}%`,
+              backgroundColor: strokeColor 
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [dataList, setDataList] = useState([]);
+  const [dragActive, setDragActive] = useState(false);
   const [copiedRowId, setCopiedRowId] = useState(null);
   const [copiedAll, setCopiedAll] = useState(false);
   const [error, setError] = useState('');
@@ -92,6 +183,11 @@ function App() {
 
   // Đọc và trích xuất từng file
   const processSingleFile = async (item) => {
+    if (!item.file || item.id.startsWith('mock-')) {
+      // Không chạy xử lý thực tế đối với các tệp dữ liệu mẫu
+      return;
+    }
+
     setDataList(prev => prev.map(d => d.id === item.id ? { ...d, status: 'processing', error: '' } : d));
 
     try {
@@ -176,28 +272,88 @@ function App() {
     }
   };
 
+  const handleDrag = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const files = e.dataTransfer.files;
+      const newItems = Array.from(files)
+        .filter(file => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
+        .map((file, index) => {
+          const sizeMB = (file.size / (1024 * 1024)).toFixed(1) + 'MB';
+          return {
+            id: `${file.name}-${Date.now()}-${index}`,
+            fileName: file.name,
+            file: file,
+            fileSize: sizeMB,
+            fileType: 'PDF',
+            uploadedBy: 'Admin',
+            status: 'pending',
+            addedAt: formatDate(new Date()),
+            retryCount: 0,
+            error: '',
+            soDen: '',
+            soKyHieu: '',
+            ngayVBDen: '',
+            noiDung: '',
+            yKienChiDao: '',
+            thoiHanGiaiQuyet: '',
+            tienDoGiaiQuyet: '',
+            soKyHieuVBTraLoi: ''
+          };
+        });
+
+      if (newItems.length === 0) {
+        setError('Vui lòng chọn các file PDF hợp lệ.');
+        return;
+      }
+
+      setError('');
+      setDataList(prev => [...prev, ...newItems]);
+    }
+  };
+
   const handleFileUpload = (event) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
     const newItems = Array.from(files)
-      .filter(file => file.type === 'application/pdf')
-      .map((file, index) => ({
-        id: `${file.name}-${Date.now()}-${index}`,
-        fileName: file.name,
-        file: file,
-        status: 'pending',
-        retryCount: 0,
-        error: '',
-        soDen: '',
-        soKyHieu: '',
-        ngayVBDen: '',
-        noiDung: '',
-        yKienChiDao: '',
-        thoiHanGiaiQuyet: '',
-        tienDoGiaiQuyet: '',
-        soKyHieuVBTraLoi: ''
-      }));
+      .filter(file => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
+      .map((file, index) => {
+        const sizeMB = (file.size / (1024 * 1024)).toFixed(1) + 'MB';
+        return {
+          id: `${file.name}-${Date.now()}-${index}`,
+          fileName: file.name,
+          file: file,
+          fileSize: sizeMB,
+          fileType: 'PDF',
+          uploadedBy: 'Admin',
+          status: 'pending',
+          addedAt: formatDate(new Date()),
+          retryCount: 0,
+          error: '',
+          soDen: '',
+          soKyHieu: '',
+          ngayVBDen: '',
+          noiDung: '',
+          yKienChiDao: '',
+          thoiHanGiaiQuyet: '',
+          tienDoGiaiQuyet: '',
+          soKyHieuVBTraLoi: ''
+        };
+      });
 
     if (newItems.length === 0) {
       setError('Vui lòng chọn các file PDF hợp lệ.');
@@ -414,472 +570,477 @@ function App() {
     groq: 'Groq'
   };
   const PROVIDER_COLORS = {
-    gemini: 'bg-blue-50 text-blue-700 border-blue-200',
-    'gemini-via-vercel': 'bg-blue-50 text-blue-700 border-blue-200',
-    openrouter: 'bg-violet-50 text-violet-700 border-violet-200',
-    groq: 'bg-orange-50 text-orange-700 border-orange-200',
-    '': 'bg-slate-50 text-slate-600 border-slate-200'
+    gemini: 'bg-blue-950/40 text-blue-300 border-blue-800/50',
+    'gemini-via-vercel': 'bg-blue-950/40 text-blue-300 border-blue-800/50',
+    openrouter: 'bg-violet-950/40 text-violet-300 border-violet-800/50',
+    groq: 'bg-amber-950/40 text-amber-300 border-amber-850/50',
+    '': 'bg-slate-800/40 text-slate-300 border-slate-700/50'
   };
 
   return (
-    <div className="min-h-screen bg-slate-50/50 text-slate-800 p-4 md:p-8 font-sans transition-all">
-      <div className="max-w-6xl mx-auto space-y-6">
+    <div className="min-h-screen bg-[#050b14] text-slate-200 p-4 md:p-8 font-sans transition-all">
+      <div className="max-w-7xl mx-auto space-y-6 w-full">
         
-        {/* Header Section (Thiết kế phong cách CRM trắng đẹp, hiện đại 2026) */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="flex items-center gap-4 text-left">
-            {/* Biểu tượng tệp tin thiết kế phẳng sang trọng */}
-            <div className="w-12 h-12 bg-blue-600/10 text-blue-600 rounded-xl flex items-center justify-center shrink-0 font-bold text-xl">
-              📄
-            </div>
-            <div>
-              <h1 className="text-xl md:text-2xl font-bold text-slate-900 tracking-tight leading-tight">
-                Hệ Thống Trích Xuất Văn Bản PDF
-              </h1>
-              <p className="text-slate-500 text-xs md:text-sm mt-0.5 font-medium">
-                Ứng dụng AI phân tích số hóa hồ sơ công văn văn thư hành chính
-              </p>
-            </div>
-          </div>
-          
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
-            {/* Tab Menu Navigation (Premium Pill style) */}
-            <div className="flex border border-slate-200/60 bg-slate-50 p-1 rounded-xl shadow-xs">
-              {[
-                { id: 'ocr', label: '📄 Trích Xuất' },
-                { id: 'stats', label: '📊 Thống Kê' },
-                { id: 'config', label: '⚙️ Cấu Hình' }
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  id={`tab-${tab.id}`}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`py-2 px-3 md:px-4 rounded-lg text-xs md:text-sm font-extrabold transition-all text-center whitespace-nowrap ${
-                    activeTab === tab.id
-                      ? 'bg-blue-600 text-white shadow-xs'
-                      : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100/50'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            <button
-              id="btn-export-excel"
-              onClick={exportToExcel}
-              disabled={dataList.length === 0}
-              className={`flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs md:text-sm transition-all shadow-sm ${
-                dataList.length === 0 
-                  ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed' 
-                  : 'bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-600'
-              }`}
-            >
-              📥 Xuất Excel
-            </button>
-          </div>
+        {/* Centered Tab Navigation (Premium Pill Style) */}
+        <div className="flex justify-center gap-3 mb-8">
+          {[
+            { id: 'ocr', label: 'Trích Xuất OCR' },
+            { id: 'stats', label: 'Thống Kê' },
+            { id: 'config', label: 'Cấu Hình' }
+          ].map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                id={`tab-${tab.id}`}
+                onClick={() => setActiveTab(tab.id)}
+                className={`py-2.5 px-6 rounded-lg text-sm font-bold transition-all duration-300 border ${
+                  isActive
+                    ? 'bg-[#00c2ff] text-[#050b14] border-[#00c2ff] shadow-[0_0_15px_rgba(0,194,255,0.35)]'
+                    : 'bg-[#09101c]/80 text-[#8b9bb4] border-[#00c2ff]/30 hover:border-[#00c2ff]/80 hover:text-white'
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
 
         {/* OCR TAB */}
         {activeTab === 'ocr' && (
-          <>
-            {/* Upload Zone (Phong cách CRM phẳng, tinh tế) */}
-            <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm">
-              <label 
-                htmlFor="file-upload" 
-                className={`cursor-pointer flex flex-col md:flex-row items-center justify-between gap-4 p-5 md:p-6 border border-dashed border-slate-200 bg-slate-50/20 rounded-xl hover:bg-slate-50/50 hover:border-slate-300 transition-colors ${
-                  isProcessing ? 'opacity-85 pointer-events-none' : ''
-                }`}
-              >
-                <div className="flex items-center gap-4 text-left">
-                  {/* Đám mây phong cách CRM tối giản */}
-                  <div className="w-10 h-10 bg-blue-600/10 text-blue-600 rounded-full flex items-center justify-center shrink-0 text-lg">
-                    ☁️
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-slate-800 text-sm md:text-base leading-snug">
-                      {isProcessing ? `Đang tự động đọc ${stats.processing} file PDF cùng lúc...` : 'Kéo & thả PDF vào đây'}
-                    </h3>
-                    <p className="text-slate-500 text-xs mt-0.5 font-normal">
-                      Chọn nhiều file cùng lúc để tự động xử lý hàng loạt song song
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-sm transition-colors shadow-sm shrink-0">
-                  Chọn File
-                </div>
-
-                <input 
-                  id="file-upload" 
-                  type="file" 
-                  accept=".pdf" 
-                  multiple
-                  className="hidden" 
-                  onChange={handleFileUpload}
-                  disabled={isProcessing}
-                />
-              </label>
-
-              {error && (
-                <div className="mt-3 p-2.5 bg-rose-50 border border-rose-100 text-rose-800 rounded-lg text-xs font-semibold text-center">
-                  Lỗi: {error}
-                </div>
-              )}
-            </div>
-
-            {/* Queue Stats Bar */}
-            {dataList.length > 0 && (
-              <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm space-y-3">
-                {/* Thống kê tổng */}
-                <div className="flex flex-wrap justify-between items-center gap-3 text-xs md:text-sm">
-                  <div className="flex flex-wrap items-center gap-x-6 gap-y-1 font-semibold text-slate-500">
-                    <span>Tổng: <strong className="text-slate-900">{stats.total}</strong></span>
-                    <span>Đang chạy: <strong className="text-blue-600">{stats.processing}</strong></span>
-                    <span>Thành công: <strong className="text-emerald-700">{stats.completed}</strong></span>
-                    {stats.failed > 0 && <span>Thất bại: <strong className="text-rose-700">{stats.failed}</strong></span>}
-                    {stats.pending > 0 && <span>Chờ: <strong className="text-slate-500">{stats.pending}</strong></span>}
-                  </div>
-                  <button
-                    id="btn-clear-list"
-                    onClick={handleClearAll}
-                    className="text-xs text-rose-700 hover:underline font-bold transition-colors shrink-0"
-                  >
-                    Xóa sạch danh sách
-                  </button>
-                </div>
-
-                {/* Tiến trình luồng đang chạy */}
-                {(activeItems.length > 0 || waitingItems.length > 0) && (
-                  <div className="border-t border-slate-100 pt-2.5">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Luồng đang xử lý</p>
-                    <div className="flex flex-wrap gap-2">
-                      {activeItems.map(item => (
-                        <div
-                          key={item.id}
-                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-semibold bg-blue-50 border-blue-200 text-blue-700"
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shrink-0"></span>
-                          <span className="max-w-[140px] truncate" title={item.fileName}>{item.fileName.replace(/\.pdf$/i, '')}</span>
-                          <span className="text-blue-400 font-normal">· AI đang đọc...</span>
-                        </div>
-                      ))}
-                      {waitingItems.map(item => (
-                        <div
-                          key={item.id}
-                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-semibold bg-amber-50 border-amber-200 text-amber-700"
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
-                          <span className="max-w-[140px] truncate" title={item.fileName}>{item.fileName.replace(/\.pdf$/i, '')}</span>
-                          <span className="text-amber-400 font-normal">· chờ thử lại {item.retryCount}/3</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Hiển thị model đã dùng cho các file hoàn thành gần đây */}
-                {dataList.some(d => d.status === 'completed' && d.usedProvider) && (
-                  <div className="border-t border-slate-100 pt-2.5">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Mô hình đã sử dụng</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {(() => {
-                        // Gom nhóm theo provider + model
-                        const groups = {};
-                        dataList.forEach(d => {
-                          if (d.status === 'completed' && d.usedProvider) {
-                            const key = `${d.usedProvider}||${d.usedModel || ''}`;
-                            groups[key] = (groups[key] || 0) + 1;
-                          }
-                        });
-                        return Object.entries(groups).map(([key, count]) => {
-                          const [prov, mdl] = key.split('||');
-                          const colorClass = PROVIDER_COLORS[prov] || PROVIDER_COLORS[''];
-                          const label = PROVIDER_LABELS[prov] || prov;
-                          // Rút gọn model name cho gọn
-                          const shortModel = mdl
-                            ? mdl.replace('google/', '').replace(':free', '').replace('meta-llama/', '').replace('-instruct', '').replace('-preview', '')
-                            : '';
-                          return (
-                            <span key={key} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold ${colorClass}`}>
-                              {label}
-                              {shortModel && <span className="text-[10px] font-normal opacity-70">·{shortModel}</span>}
-                              <span className="font-bold">×{count}</span>
-                            </span>
-                          );
-                        });
-                      })()}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Data Table Section (Bảng kết quả phẳng CRM 2026 sang trọng) */}
-            <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
-              <div className="px-6 py-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white">
-                <h2 className="text-sm md:text-base font-bold text-slate-900 tracking-tight">
-                  Danh sách kết quả trích xuất ({dataList.length} văn bản)
-                </h2>
-                <div className="flex flex-wrap items-center gap-2">
-                  {dataList.length > 0 && (
-                    <button
-                      id="btn-copy-all"
-                      onClick={handleCopyAll}
-                      className={`px-4 py-1.5 rounded-lg text-xs md:text-sm font-bold border transition-colors ${
-                        copiedAll 
-                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
-                          : 'bg-white hover:bg-slate-50 text-slate-500 border-slate-200 shadow-sm'
-                      }`}
-                    >
-                      {copiedAll ? 'Đã copy toàn bộ!' : '📋 Copy toàn bộ kết quả'}
-                    </button>
-                  )}
-                </div>
-              </div>
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
+            
+            {/* Left Area (Queue + Dropzone + Table) - Spans 3 columns */}
+            <div className="lg:col-span-3 space-y-6">
               
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm md:text-base text-left text-slate-700 border-collapse">
-                  <thead className="text-[11px] md:text-xs text-slate-500 uppercase bg-slate-50/50 border-b border-slate-100 font-bold tracking-wider">
-                    <tr>
-                      <th className="px-3 py-3 w-16 text-center">STT</th>
-                      <th className="px-3 py-3 min-w-[90px]">Số Đến</th>
-                      <th className="px-3 py-3 min-w-[130px]">Số Ký Hiệu</th>
-                      <th className="px-3 py-3 min-w-[280px]">Nội Dung</th>
-                      <th className="px-3 py-3 min-w-[110px]">Ngày Đến</th>
-                      <th className="px-3 py-3 min-w-[110px]">Thời Hạn</th>
-                      <th className="px-3 py-3 min-w-[160px]">Ý Kiến</th>
-                      <th className="px-3 py-3 min-w-[120px]">Tiến Độ</th>
-                      <th className="px-3 py-3 min-w-[120px]">VB Trả Lời</th>
-                      <th className="px-3 py-3 w-12 text-center"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
+              {/* Row 1: Queue + Dropzone */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                
+                {/* Column 1: Processing Queue */}
+                <div className="md:col-span-1 bg-[#0d1726]/60 backdrop-blur-xl border border-[#16253b] rounded-2xl p-5 shadow-lg flex flex-col justify-between h-[300px]">
+                  <div className="flex justify-between items-center mb-4">
+                    <span className="text-white font-extrabold text-sm tracking-tight">Processing Queue</span>
+                    <button className="text-slate-400 hover:text-white transition-colors text-lg font-bold">•••</button>
+                  </div>
+                  
+                  {/* Queue Items list */}
+                  <div className="space-y-2 overflow-y-auto flex-1 pr-1 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
                     {dataList.length === 0 ? (
-                      <tr>
-                        <td colSpan="10" className="px-4 py-16 text-center text-slate-400 font-medium text-sm md:text-base">
-                          Chưa có văn bản nào trong hàng đợi. Nhấp vào nút "Chọn File" ở trên để bắt đầu.
-                        </td>
-                      </tr>
+                      <div className="h-full flex items-center justify-center text-xs text-slate-500 font-semibold py-8">
+                        Hàng đợi trống
+                      </div>
                     ) : (
-                      dataList.map((item, index) => {
+                      dataList.map((item) => {
                         const isProcessingRow = item.status === 'processing';
                         const isPending = item.status === 'pending';
                         const isCompleted = item.status === 'completed';
                         const isRetrying = item.status === 'waiting_retry';
                         const isFailed = item.status === 'failed';
 
-                        const isExpanded = !!expandedRows[item.id];
+                        if (isCompleted) {
+                          return (
+                            <div key={item.id} className="bg-[#0f1d1e] border border-[#164e52]/40 rounded-xl p-3 text-xs font-bold text-[#2dd4bf] flex items-center justify-between">
+                              <span className="truncate max-w-[150px]">{item.fileName}</span>
+                              <span className="shrink-0 text-[10px]">Hoàn tất</span>
+                            </div>
+                          );
+                        }
+
+                        if (isProcessingRow) {
+                          return (
+                            <div key={item.id} className="relative overflow-hidden rounded-xl bg-[#122647] border border-blue-900/50 p-3 text-xs font-bold text-blue-300">
+                              <div className="flex justify-between items-center mb-1">
+                                <span className="truncate max-w-[120px]">{item.fileName}</span>
+                                <span className="shrink-0 text-[10px]">Đang xử lý {item.progress || 85}%</span>
+                              </div>
+                              <div className="w-full h-1 bg-blue-950 rounded-full overflow-hidden">
+                                <div className="h-full bg-blue-400 rounded-full animate-pulse" style={{ width: `${item.progress || 85}%` }} />
+                              </div>
+                            </div>
+                          );
+                        }
 
                         return (
-                          <Fragment key={item.id}>
-                            <tr 
-                              className={`transition-all duration-300 hover:bg-slate-50/50 slide-in ${
-                                isExpanded ? 'bg-slate-50/30 border-l-4 border-l-blue-600' : ''
-                              } ${
-                                isProcessingRow ? 'breathe' : ''
-                              } ${
-                                isCompleted ? 'pop-in' : ''
-                              }`}
-                            >
-                              {/* STT Column */}
-                              <td className="px-3 py-2 text-center">
-                                <div className="flex items-center justify-center gap-1.5">
-                                  <button 
-                                    onClick={() => toggleRow(item.id)}
-                                    className={`w-5 h-5 rounded font-extrabold text-[10px] flex items-center justify-center border transition-colors shrink-0 ${
-                                      isExpanded 
-                                        ? 'bg-slate-800 text-white border-slate-800' 
-                                        : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-sm'
-                                    }`}
-                                  >
-                                    {isExpanded ? '−' : '+'}
-                                  </button>
-                                  <span className="text-slate-500 font-bold text-sm w-4 text-center">{index + 1}</span>
-                                </div>
-                              </td>
-
-                              {/* SỐ ĐẾN */}
-                              <td className="px-2 py-1.5">
-                                {isProcessingRow ? (
-                                  <div className="skeleton h-6 w-14 mx-1" />
-                                ) : (
-                                  <input 
-                                    type="text" 
-                                    value={item.soDen || ''} 
-                                    onChange={(e) => handleUpdateSoDen(index, e.target.value)}
-                                    className="w-full bg-transparent hover:bg-slate-50 focus:bg-white focus:ring-1 focus:ring-blue-500 rounded border-0 px-2 py-1 text-slate-900 font-bold text-[14px] outline-none transition-all"
-                                    placeholder="..."
-                                  />
-                                )}
-                              </td>
-
-                              {/* SỐ KÝ HIỆU */}
-                              <td className="px-2 py-1.5">
-                                {isProcessingRow ? (
-                                  <div className="skeleton h-6 w-24 mx-1" />
-                                ) : (
-                                  <input 
-                                    type="text" 
-                                    value={item.soKyHieu || ''} 
-                                    onChange={(e) => handleUpdateField(item.id, 'soKyHieu', e.target.value)}
-                                    className="w-full bg-transparent hover:bg-slate-50 focus:bg-white focus:ring-1 focus:ring-blue-500 rounded border-0 px-2 py-1 text-slate-900 font-bold text-[14px] outline-none transition-all"
-                                    placeholder="..."
-                                  />
-                                )}
-                              </td>
-
-                              {/* NỘI DUNG */}
-                              <td className="px-2 py-1.5">
-                                {isProcessingRow ? (
-                                  <div className="space-y-1.5 py-1 px-1">
-                                    <div className="skeleton h-3.5 w-full" />
-                                    <div className="skeleton h-3.5 w-4/5" />
-                                  </div>
-                                ) : (
-                                  <textarea
-                                    rows={2}
-                                    value={item.noiDung || ''} 
-                                    onChange={(e) => handleUpdateField(item.id, 'noiDung', e.target.value)}
-                                    className="w-full bg-transparent hover:bg-slate-50 focus:bg-white focus:ring-1 focus:ring-blue-500 rounded border-0 px-2 py-1 text-slate-800 text-[14px] outline-none transition-all resize-y leading-relaxed font-normal min-h-[44px]"
-                                    placeholder="..."
-                                  />
-                                )}
-                              </td>
-
-                              {/* NGÀY ĐẾN */}
-                              <td className="px-2 py-1.5">
-                                {isProcessingRow ? (
-                                  <div className="skeleton h-6 w-20 mx-1" />
-                                ) : (
-                                  <input 
-                                    type="text" 
-                                    value={item.ngayVBDen || ''} 
-                                    onChange={(e) => handleUpdateField(item.id, 'ngayVBDen', e.target.value)}
-                                    className="w-full bg-transparent hover:bg-slate-50 focus:bg-white focus:ring-1 focus:ring-blue-500 rounded border-0 px-2 py-1 text-slate-800 text-[14px] outline-none transition-all"
-                                    placeholder="..."
-                                  />
-                                )}
-                              </td>
-
-                              {/* THỜI HẠN */}
-                              <td className="px-2 py-1.5">
-                                <input 
-                                  type="text" 
-                                  value={item.thoiHanGiaiQuyet || ''} 
-                                  onChange={(e) => handleUpdateField(item.id, 'thoiHanGiaiQuyet', e.target.value)}
-                                  className="w-full bg-transparent hover:bg-slate-50 focus:bg-white focus:ring-1 focus:ring-blue-500 rounded border-0 px-2 py-1 text-slate-800 text-[14px] outline-none transition-all"
-                                  placeholder="..."
-                                />
-                              </td>
-
-                              {/* Ý KIẾN */}
-                              <td className="px-2 py-1.5">
-                                <textarea
-                                  rows={2}
-                                  value={item.yKienChiDao || ''} 
-                                  onChange={(e) => handleUpdateField(item.id, 'yKienChiDao', e.target.value)}
-                                  className="w-full bg-transparent hover:bg-slate-50 focus:bg-white focus:ring-1 focus:ring-blue-500 rounded border-0 px-2 py-1 text-slate-800 text-[14px] outline-none transition-all resize-y leading-relaxed font-normal min-h-[44px]"
-                                  placeholder="..."
-                                />
-                              </td>
-
-                              {/* TIẾN ĐỘ */}
-                              <td className="px-2 py-1.5">
-                                <input 
-                                  type="text" 
-                                  value={item.tienDoGiaiQuyet || ''} 
-                                  onChange={(e) => handleUpdateField(item.id, 'tienDoGiaiQuyet', e.target.value)}
-                                  className="w-full bg-transparent hover:bg-slate-50 focus:bg-white focus:ring-1 focus:ring-blue-500 rounded border-0 px-2 py-1 text-slate-800 text-[14px] outline-none transition-all"
-                                  placeholder="..."
-                                />
-                              </td>
-
-                              {/* VB TRẢ LỜI */}
-                              <td className="px-2 py-1.5">
-                                <input 
-                                  type="text" 
-                                  value={item.soKyHieuVBTraLoi || ''} 
-                                  onChange={(e) => handleUpdateField(item.id, 'soKyHieuVBTraLoi', e.target.value)}
-                                  className="w-full bg-transparent hover:bg-slate-50 focus:bg-white focus:ring-1 focus:ring-blue-500 rounded border-0 px-2 py-1 text-slate-800 text-[14px] outline-none transition-all"
-                                  placeholder="..."
-                                />
-                              </td>
-
-                              {/* Delete Action Column */}
-                              <td className="px-3 py-2 text-center">
-                                <button
-                                  onClick={() => handleRemoveFile(item.id)}
-                                  className="w-8 h-8 rounded-lg hover:bg-rose-50 text-rose-600 flex items-center justify-center transition-colors font-bold text-base"
-                                  title="Xóa dòng này"
-                                >
-                                  🗑️
-                                </button>
-                              </td>
-                            </tr>
-
-                            {isExpanded && (
-                              <tr className="bg-slate-50/50">
-                                <td colSpan="10" className="px-6 py-4 border-t border-b border-slate-100">
-                                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 text-sm">
-                                    <div className="space-y-1">
-                                      <span className="text-slate-400 font-bold text-[10px] uppercase block tracking-wider">Tên file PDF</span>
-                                      <span className="text-slate-700 font-bold break-all text-sm">{item.fileName}</span>
-                                    </div>
-                                    <div className="space-y-1">
-                                      <span className="text-slate-400 font-bold text-[10px] uppercase block tracking-wider">Trạng thái đọc OCR</span>
-                                      <div className="flex items-center gap-2">
-                                        {isProcessingRow && <span className="font-semibold text-blue-600">Đang đọc <span className="dot-bounce text-blue-500"><span/><span/><span/></span></span>}
-                                        {isPending && <span className="font-semibold text-slate-500">Chờ xử lý</span>}
-                                        {isCompleted && <span className="font-semibold text-emerald-600">✔ Thành công</span>}
-                                        {isRetrying && <span className="font-semibold text-amber-600">Thử lại {item.retryCount}/3</span>}
-                                        {isFailed && <span className="font-semibold text-rose-600">✗ Thất bại</span>}
-                                        {isFailed && (
-                                          <span className="text-rose-700 text-xs font-semibold">({item.error || 'Lỗi kết nối'})</span>
-                                        )}
-                                        {isRetrying && (
-                                          <span className="text-amber-700 text-xs font-semibold animate-pulse">(Tự động kết nối lại...)</span>
-                                        )}
-                                      </div>
-                                      {isProcessingRow && (
-                                        <div className="progress-bar-track mt-2" style={{width: 180}}>
-                                          <div className="progress-bar-thumb" />
-                                        </div>
-                                      )}
-                                    </div>
-                                    <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
-                                      <button
-                                        onClick={() => handleCopyRow(item)}
-                                        className={`px-3 py-1.5 rounded-lg border font-bold text-xs transition-colors shadow-sm ${
-                                          copiedRowId === item.id
-                                            ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                                            : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
-                                        }`}
-                                      >
-                                        {copiedRowId === item.id ? 'Đã copy!' : '📋 Copy Dòng'}
-                                      </button>
-                                      {(item.status === 'failed' || item.status === 'waiting_retry') && (
-                                        <button
-                                          onClick={() => handleRetryFile(item)}
-                                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition-colors shadow-sm"
-                                        >
-                                          🔄 Thử lại
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-                                </td>
-                              </tr>
-                            )}
-                          </Fragment>
+                          <div key={item.id} className="bg-[#131b2c] border border-[#1e2d4a]/50 rounded-xl p-3 text-xs font-semibold text-slate-400 flex items-center justify-between">
+                            <span className="truncate max-w-[150px]">{item.fileName}</span>
+                            <span className="shrink-0 text-[10px]">Chờ</span>
+                          </div>
                         );
                       })
                     )}
-                  </tbody>
-                </table>
+                  </div>
+                  
+                  {dataList.length > 0 && (
+                    <div className="flex justify-between items-center border-t border-[#16253b] pt-3 mt-3 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">
+                      <span>Tổng: {stats.total}</span>
+                      <button onClick={handleClearAll} className="text-rose-450 hover:text-rose-350 transition-colors">Xóa hết</button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Column 2 & 3: Dropzone */}
+                <div className="md:col-span-2 bg-[#0d1726]/60 backdrop-blur-xl border border-[#16253b] rounded-2xl p-5 shadow-lg h-[300px]">
+                  <label 
+                    htmlFor="file-upload" 
+                    onDragEnter={handleDrag}
+                    onDragOver={handleDrag}
+                    onDragLeave={handleDrag}
+                    onDrop={handleDrop}
+                    className={`cursor-pointer flex flex-col items-center justify-center h-full border-2 border-dashed rounded-2xl transition-all duration-300 relative ${
+                      dragActive 
+                        ? 'border-[#00c2ff] bg-[#00c2ff]/10 scale-[1.01] shadow-[0_0_20px_rgba(0,194,255,0.25)]' 
+                        : 'border-[#00c2ff]/50 bg-[#0a1222]/80 bg-radial from-[#132c4a]/20 via-transparent to-transparent hover:bg-slate-800/15 hover:border-[#00c2ff]'
+                    } ${
+                      isProcessing ? 'opacity-85 pointer-events-none' : ''
+                    }`}
+                  >
+                    <div className="flex items-center justify-center gap-4 text-slate-400 mb-3">
+                      <div className="relative">
+                        <svg className="w-12 h-14 text-slate-500" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M6 2c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6H6zm7 7V3.5L18.5 9H13z"/>
+                        </svg>
+                        <span className="absolute inset-0 flex items-center justify-center text-[10px] font-black text-slate-900 mt-2">PDF</span>
+                      </div>
+                      <span className="text-lg font-black text-slate-650">+</span>
+                      <svg className="w-10 h-10 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                    </div>
+
+                    <h3 className="font-extrabold text-slate-200 text-sm md:text-base leading-snug">
+                      Thả tệp tin PDF vào đây hoặc nhấn để tải lên
+                    </h3>
+                    
+                    <input 
+                      id="file-upload" 
+                      type="file" 
+                      accept=".pdf" 
+                      multiple
+                      className="hidden" 
+                      onChange={handleFileUpload}
+                      disabled={isProcessing}
+                    />
+                  </label>
+                  
+                  {error && (
+                    <div className="absolute bottom-2 left-6 right-6 p-2 bg-rose-950/40 border border-rose-900/50 text-rose-300 rounded-lg text-xs font-semibold text-center">
+                      Lỗi: {error}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Row 2: Data results table */}
+              <div className="bg-[#0d1726]/60 backdrop-blur-xl border border-[#16253b] rounded-2xl shadow-xl overflow-hidden">
+                <div className="px-6 py-4 border-b border-[#16253b] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                  <h2 className="text-sm md:text-base font-black text-white tracking-tight">
+                    Data results
+                  </h2>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {dataList.length > 0 && (
+                      <>
+                        <button
+                          id="btn-copy-all"
+                          onClick={(e) => { e.stopPropagation(); handleCopyAll(); }}
+                          className={`px-4 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                            copiedAll 
+                              ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/60 shadow-[0_0_10px_rgba(16,185,129,0.15)]' 
+                              : 'bg-slate-800/60 hover:bg-slate-700/60 text-slate-300 border-slate-700/60 shadow-sm'
+                          }`}
+                        >
+                          {copiedAll ? 'Đã copy!' : '📋 Copy Kết Quả'}
+                        </button>
+                        <button
+                          id="btn-export-excel"
+                          onClick={(e) => { e.stopPropagation(); exportToExcel(); }}
+                          disabled={dataList.length === 0}
+                          className={`flex items-center justify-center gap-2 px-4 py-1.5 rounded-lg font-bold text-xs transition-all shadow-md ${
+                            dataList.length === 0 
+                              ? 'bg-slate-800/30 text-slate-650 border border-slate-800 cursor-not-allowed' 
+                              : 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500/30 shadow-[0_4px_12px_rgba(16,185,129,0.2)]'
+                          }`}
+                        >
+                          📥 Xuất Excel
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left text-slate-300 border-collapse">
+                    <thead className="text-[11px] text-slate-450 uppercase bg-[#09101c]/80 border-b border-[#16253b] font-extrabold tracking-wider">
+                      <tr>
+                        <th className="px-3 py-3 w-16 text-center text-slate-400">STT</th>
+                        <th className="px-3 py-3 min-w-[95px] text-slate-400">Số Đến</th>
+                        <th className="px-3 py-3 min-w-[130px] text-slate-400">Số Ký Hiệu</th>
+                        <th className="px-3 py-3 min-w-[280px] text-slate-400">Nội Dung Văn Bản</th>
+                        <th className="px-3 py-3 min-w-[110px] text-slate-400">Ngày Đến</th>
+                        <th className="px-3 py-3 min-w-[110px] text-slate-400">Thời Hạn</th>
+                        <th className="px-3 py-3 min-w-[160px] text-slate-400">Ý Kiến</th>
+                        <th className="px-3 py-3 min-w-[120px] text-slate-400">Tiến Độ</th>
+                        <th className="px-3 py-3 min-w-[120px] text-slate-400">VB Trả Lời</th>
+                        <th className="px-3 py-3 w-12 text-center"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#16253b] bg-[#0c1322]/40">
+                      {dataList.length === 0 ? (
+                        <tr>
+                          <td colSpan="10" className="px-6 py-16 text-center text-slate-500 font-semibold text-sm">
+                            Chưa có tệp tin nào trong hàng đợi. Nhấn nút "Chọn File" ở trên hoặc kéo thả để bắt đầu.
+                          </td>
+                        </tr>
+                      ) : (
+                        dataList.map((item, index) => {
+                          const isProcessingRow = item.status === 'processing';
+                          const isPending = item.status === 'pending';
+                          const isCompleted = item.status === 'completed';
+                          const isRetrying = item.status === 'waiting_retry';
+                          const isFailed = item.status === 'failed';
+                          const isExpanded = !!expandedRows[item.id];
+
+                          const fileSize = item.fileSize || '5.2MB';
+                          const fileType = item.fileType || 'PDF';
+                          const uploadedBy = item.uploadedBy || 'Admin';
+                          const addedAt = item.addedAt || '15/06/2026 10:15 AM';
+
+                          const rowHighlightClass = isExpanded 
+                            ? 'bg-[#122647]/30 border-l-4 border-l-[#00c2ff]' 
+                            : 'border-b border-[#16253b] hover:bg-slate-800/15';
+
+                          return (
+                            <Fragment key={item.id}>
+                              <tr className={`transition-all duration-200 ${rowHighlightClass}`}>
+                                {/* STT */}
+                                <td className="px-3 py-2 text-center">
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    <button 
+                                      onClick={() => toggleRow(item.id)}
+                                      className={`w-5 h-5 rounded font-black text-[10px] flex items-center justify-center border transition-all shrink-0 ${
+                                        isExpanded 
+                                          ? 'bg-[#00c2ff] text-[#050b14] border-[#00c2ff]' 
+                                          : 'bg-[#0a1222] hover:bg-[#00c2ff]/10 text-slate-300 border-[#1b2d4a] hover:border-[#00c2ff]/50 hover:text-[#00c2ff] shadow-sm'
+                                      }`}
+                                    >
+                                      {isExpanded ? '−' : '+'}
+                                    </button>
+                                    <span className="text-slate-400 font-bold text-sm w-4 text-center">{index + 1}</span>
+                                  </div>
+                                </td>
+
+                                {/* Số Đến */}
+                                <td className="px-2 py-1.5">
+                                  {isProcessingRow ? (
+                                    <div className="bg-[#1b2d4a]/50 animate-pulse rounded h-7 w-14 mx-1" />
+                                  ) : (
+                                    <input 
+                                      type="text" 
+                                      value={item.soDen || ''} 
+                                      onChange={(e) => handleUpdateSoDen(index, e.target.value)}
+                                      className="w-full bg-transparent hover:bg-[#16253b]/30 focus:bg-[#0a1222]/90 focus:ring-1 focus:ring-[#00c2ff] rounded border-0 px-2 py-1 text-white font-bold text-[14px] outline-none transition-all"
+                                      placeholder="..."
+                                    />
+                                  )}
+                                </td>
+
+                                {/* Số Ký Hiệu */}
+                                <td className="px-2 py-1.5">
+                                  {isProcessingRow ? (
+                                    <div className="bg-[#1b2d4a]/50 animate-pulse rounded h-7 w-24 mx-1" />
+                                  ) : (
+                                    <input 
+                                      type="text" 
+                                      value={item.soKyHieu || ''} 
+                                      onChange={(e) => handleUpdateField(item.id, 'soKyHieu', e.target.value)}
+                                      className="w-full bg-transparent hover:bg-[#16253b]/30 focus:bg-[#0a1222]/90 focus:ring-1 focus:ring-[#00c2ff] rounded border-0 px-2 py-1 text-white font-bold text-[14px] outline-none transition-all"
+                                      placeholder="..."
+                                    />
+                                  )}
+                                </td>
+
+                                {/* Nội Dung Văn Bản */}
+                                <td className="px-2 py-1.5">
+                                  {isProcessingRow ? (
+                                    <div className="space-y-1.5 py-1 px-1">
+                                      <div className="bg-[#1b2d4a]/50 animate-pulse rounded h-3.5 w-full" />
+                                      <div className="bg-[#1b2d4a]/50 animate-pulse rounded h-3.5 w-4/5" />
+                                    </div>
+                                  ) : (
+                                    <textarea
+                                      rows={2}
+                                      value={item.noiDung || ''} 
+                                      onChange={(e) => handleUpdateField(item.id, 'noiDung', e.target.value)}
+                                      className="w-full bg-transparent hover:bg-[#16253b]/30 focus:bg-[#0a1222]/90 focus:ring-1 focus:ring-[#00c2ff] rounded border-0 px-2 py-1 text-slate-200 text-[14px] outline-none transition-all resize-y leading-relaxed font-normal min-h-[44px]"
+                                      placeholder="..."
+                                    />
+                                  )}
+                                </td>
+
+                                {/* Ngày Đến */}
+                                <td className="px-2 py-1.5">
+                                  {isProcessingRow ? (
+                                    <div className="bg-[#1b2d4a]/50 animate-pulse rounded h-7 w-20 mx-1" />
+                                  ) : (
+                                    <input 
+                                      type="text" 
+                                      value={item.ngayVBDen || ''} 
+                                      onChange={(e) => handleUpdateField(item.id, 'ngayVBDen', e.target.value)}
+                                      className="w-full bg-transparent hover:bg-[#16253b]/30 focus:bg-[#0a1222]/90 focus:ring-1 focus:ring-[#00c2ff] rounded border-0 px-2 py-1 text-slate-200 text-[14px] outline-none transition-all"
+                                      placeholder="..."
+                                    />
+                                  )}
+                                </td>
+
+                                {/* Thời Hạn */}
+                                <td className="px-2 py-1.5">
+                                  <input 
+                                    type="text" 
+                                    value={item.thoiHanGiaiQuyet || ''} 
+                                    onChange={(e) => handleUpdateField(item.id, 'thoiHanGiaiQuyet', e.target.value)}
+                                    className="w-full bg-transparent hover:bg-[#16253b]/30 focus:bg-[#0a1222]/90 focus:ring-1 focus:ring-[#00c2ff] rounded border-0 px-2 py-1 text-slate-200 text-[14px] outline-none transition-all"
+                                    placeholder="..."
+                                  />
+                                </td>
+
+                                {/* Ý Kiến */}
+                                <td className="px-2 py-1.5">
+                                  <textarea
+                                    rows={2}
+                                    value={item.yKienChiDao || ''} 
+                                    onChange={(e) => handleUpdateField(item.id, 'yKienChiDao', e.target.value)}
+                                    className="w-full bg-transparent hover:bg-[#16253b]/30 focus:bg-[#0a1222]/90 focus:ring-1 focus:ring-[#00c2ff] rounded border-0 px-2 py-1 text-slate-200 text-[14px] outline-none transition-all resize-y leading-relaxed font-normal min-h-[44px]"
+                                    placeholder="..."
+                                  />
+                                </td>
+
+                                {/* Tiến Độ */}
+                                <td className="px-2 py-1.5">
+                                  <input 
+                                    type="text" 
+                                    value={item.tienDoGiaiQuyet || ''} 
+                                    onChange={(e) => handleUpdateField(item.id, 'tienDoGiaiQuyet', e.target.value)}
+                                    className="w-full bg-transparent hover:bg-[#16253b]/30 focus:bg-[#0a1222]/90 focus:ring-1 focus:ring-[#00c2ff] rounded border-0 px-2 py-1 text-slate-200 text-[14px] outline-none transition-all"
+                                    placeholder="..."
+                                  />
+                                </td>
+
+                                {/* VB Trả Lời */}
+                                <td className="px-2 py-1.5">
+                                  <input 
+                                    type="text" 
+                                    value={item.soKyHieuVBTraLoi || ''} 
+                                    onChange={(e) => handleUpdateField(item.id, 'soKyHieuVBTraLoi', e.target.value)}
+                                    className="w-full bg-transparent hover:bg-[#16253b]/30 focus:bg-[#0a1222]/90 focus:ring-1 focus:ring-[#00c2ff] rounded border-0 px-2 py-1 text-slate-200 text-[14px] outline-none transition-all"
+                                    placeholder="..."
+                                  />
+                                </td>
+
+                                {/* Xóa dòng */}
+                                <td className="px-3 py-2 text-center">
+                                  <button
+                                    onClick={() => handleRemoveFile(item.id)}
+                                    className="w-8 h-8 rounded-lg hover:bg-rose-950/50 text-rose-450 hover:text-rose-350 flex items-center justify-center transition-colors font-bold text-base"
+                                    title="Xóa dòng này"
+                                  >
+                                    🗑️
+                                  </button>
+                                </td>
+                              </tr>
+
+                              {isExpanded && (
+                                <tr className="bg-[#09101c]/80">
+                                  <td colSpan="10" className="px-6 py-4 border-b border-[#16253b]">
+                                    <div className="bg-[#101c30]/70 border border-[#1b2d4a] rounded-xl p-5 space-y-4 text-left" onClick={(e) => e.stopPropagation()}>
+                                      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 text-sm">
+                                        <div className="space-y-1">
+                                          <span className="text-slate-500 font-bold text-[10px] uppercase block tracking-wider">Tên file PDF</span>
+                                          <span className="text-slate-300 font-bold break-all text-sm">{item.fileName}</span>
+                                        </div>
+                                        <div className="space-y-1">
+                                          <span className="text-slate-500 font-bold text-[10px] uppercase block tracking-wider">Thông tin file</span>
+                                          <span className="text-slate-400 text-xs block">Kích thước: {fileSize} | Loại: {fileType} | Ngày tải: {addedAt}</span>
+                                        </div>
+                                        <div className="space-y-1">
+                                          <span className="text-slate-500 font-bold text-[10px] uppercase block tracking-wider">Trạng thái đọc OCR</span>
+                                          <div className="flex items-center gap-2">
+                                            {isProcessingRow && <span className="font-semibold text-blue-400">Đang đọc <span className="dot-bounce text-blue-400"><span></span><span></span><span></span></span></span>}
+                                            {isPending && <span className="font-semibold text-slate-400">Chờ xử lý</span>}
+                                            {isCompleted && <span className="font-semibold text-emerald-400">✔ Thành công</span>}
+                                            {isRetrying && <span className="font-semibold text-amber-400">Thử lại {item.retryCount}/3</span>}
+                                            {isFailed && <span className="font-semibold text-rose-400">✗ Thất bại</span>}
+                                            {isFailed && (
+                                              <span className="text-rose-300 text-xs font-semibold">({item.error || 'Lỗi kết nối'})</span>
+                                            )}
+                                            {isRetrying && (
+                                              <span className="text-amber-300 text-xs font-semibold animate-pulse">(Tự động kết nối lại...)</span>
+                                            )}
+                                          </div>
+                                          {isProcessingRow && (
+                                            <div className="w-44 h-1.5 bg-slate-800 rounded-full overflow-hidden mt-2">
+                                              <div className="h-full bg-blue-500 rounded-full animate-[progress_2s_ease-in-out_infinite]" style={{ width: '100%' }}></div>
+                                            </div>
+                                          )}
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                                          <button
+                                            onClick={() => handleCopyRow(item)}
+                                            className={`px-3 py-1.5 rounded-lg border font-bold text-xs transition-colors shadow-sm ${
+                                              copiedRowId === item.id
+                                                ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/60'
+                                                : 'bg-slate-850 hover:bg-slate-750 text-slate-350 border-slate-750'
+                                            }`}
+                                          >
+                                            {copiedRowId === item.id ? 'Đã copy!' : '📋 Copy Kết Quả'}
+                                          </button>
+                                          {(item.status === 'failed' || item.status === 'waiting_retry') && (
+                                            <button
+                                              onClick={() => handleRetryFile(item)}
+                                              className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors shadow-md animate-pulse"
+                                            >
+                                              🔄 Thử lại
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
-          </>
+
+            {/* Right Sidebar (Stats Gauge Cards) - Spans 1 column */}
+            <div className="lg:col-span-1 space-y-6">
+              <QuotaGauge 
+                title="Tỷ Lệ Thành Công" 
+                percentage={stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0} 
+                color="green" 
+                valueText={stats.total > 0 ? `${stats.completed}/${stats.total} tệp` : "0 tệp"} 
+                description="Tỷ lệ tệp PDF đã hoàn tất đọc OCR thành công"
+              />
+              <QuotaGauge 
+                title="Tiến Độ Hàng Đợi" 
+                percentage={stats.total > 0 ? Math.round(((stats.completed + stats.processing) / stats.total) * 100) : 0} 
+                color="orange" 
+                valueText={stats.total > 0 ? `${stats.completed + stats.processing}/${stats.total} tệp` : "Trống"} 
+                description="Tỷ lệ tệp đang/đã hoàn tất xử lý"
+              />
+              <QuotaGauge 
+                title="Tỷ Lệ Lỗi (Thất Bại)" 
+                percentage={stats.total > 0 ? Math.round((stats.failed / stats.total) * 100) : 0} 
+                color="red" 
+                valueText={stats.total > 0 ? `${stats.failed}/${stats.total} tệp lỗi` : "0 tệp"} 
+                description="Tỷ lệ tệp gặp lỗi trong hàng đợi"
+              />
+            </div>
+          </div>
         )}
 
         {/* STATS TAB */}
@@ -889,31 +1050,31 @@ function App() {
             {statsLoading ? (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[...Array(4)].map((_, i) => (
-                  <div key={i} className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm space-y-3 breathe">
-                    <div className="w-8 h-8 bg-slate-100 rounded-lg animate-pulse" />
-                    <div className="h-4 bg-slate-100 rounded w-1/2 animate-pulse" />
-                    <div className="h-6 bg-slate-100 rounded w-3/4 animate-pulse" />
+                  <div key={i} className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-2xl p-5 shadow-lg space-y-3 breathe">
+                    <div className="w-8 h-8 bg-slate-800 rounded-lg animate-pulse" />
+                    <div className="h-4 bg-slate-800 rounded w-1/2 animate-pulse" />
+                    <div className="h-6 bg-slate-800 rounded w-3/4 animate-pulse" />
                   </div>
                 ))}
               </div>
             ) : statsError ? (
-              <div className="bg-rose-50 border border-rose-100 text-rose-800 rounded-2xl p-6 text-center shadow-xs">
+              <div className="bg-rose-950/30 border border-rose-900/50 text-rose-300 rounded-2xl p-6 text-center shadow-lg">
                 <span className="text-2xl mb-2 block">⚠️</span>
                 <p className="font-bold text-sm mb-3">Không thể tải dữ liệu thống kê từ hệ thống</p>
-                <p className="text-xs text-rose-600 mb-4">{statsError}</p>
+                <p className="text-xs text-rose-400 mb-4">{statsError}</p>
                 <button
                   id="btn-refresh-stats"
                   onClick={fetchStats}
-                  className="px-4 py-2 bg-rose-600 text-white rounded-lg font-bold text-xs hover:bg-rose-700 transition-colors shadow-sm"
+                  className="px-4 py-2 bg-rose-600 text-white rounded-lg font-bold text-xs hover:bg-rose-500 transition-colors shadow-md"
                 >
                   🔄 Tải lại dữ liệu
                 </button>
               </div>
             ) : !statsData || statsData.summary.total === 0 ? (
-              <div className="bg-white border border-slate-100 rounded-2xl p-16 text-center shadow-sm">
+              <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-2xl p-16 text-center shadow-lg">
                 <span className="text-4xl mb-4 block">📊</span>
-                <p className="font-bold text-slate-700 text-base mb-1">Chưa có dữ liệu thống kê</p>
-                <p className="text-xs text-slate-405 max-w-sm mx-auto leading-relaxed">
+                <p className="font-bold text-white text-base mb-1">Chưa có dữ liệu thống kê</p>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
                   Hệ thống chưa ghi nhận bất kỳ lượt trích xuất tài liệu nào. Hãy bắt đầu tải file lên để lưu dữ liệu thống kê.
                 </p>
               </div>
@@ -922,52 +1083,52 @@ function App() {
                 {/* 4 Cards Stats */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {/* Card 1: Tổng cộng */}
-                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50/50 rounded-2xl border border-blue-100/70 p-5 shadow-xs hover:shadow-sm hover:scale-[1.01] transition-all">
-                    <div className="w-10 h-10 bg-blue-600/10 text-blue-600 rounded-xl flex items-center justify-center font-bold text-lg mb-3">
+                  <div className="bg-gradient-to-br from-blue-950/40 to-slate-900/40 rounded-2xl border border-blue-900/30 p-5 shadow-lg hover:shadow-xl hover:scale-[1.01] hover:border-blue-800/50 transition-all duration-300">
+                    <div className="w-10 h-10 bg-blue-500/10 text-blue-450 rounded-xl flex items-center justify-center font-bold text-lg mb-3 border border-blue-500/10">
                       📂
                     </div>
-                    <span className="text-xs text-blue-800/70 font-bold block uppercase tracking-wider">Tổng file xử lý</span>
-                    <span className="text-2xl md:text-3xl font-extrabold text-blue-900 mt-1 block">{statsData.summary.total}</span>
-                    <span className="text-[10px] text-blue-600 font-semibold mt-1 block">Tất cả các phiên làm việc</span>
+                    <span className="text-xs text-blue-400/80 font-bold block uppercase tracking-wider">Tổng file xử lý</span>
+                    <span className="text-2xl md:text-3xl font-extrabold text-white mt-1 block">{statsData.summary.total}</span>
+                    <span className="text-[10px] text-blue-400 font-semibold mt-1 block">Tất cả các phiên làm việc</span>
                   </div>
 
                   {/* Card 2: Thành công */}
-                  <div className="bg-gradient-to-br from-emerald-50 to-teal-50/50 rounded-2xl border border-emerald-100/70 p-5 shadow-xs hover:shadow-sm hover:scale-[1.01] transition-all">
-                    <div className="w-10 h-10 bg-emerald-600/10 text-emerald-600 rounded-xl flex items-center justify-center font-bold text-lg mb-3">
+                  <div className="bg-gradient-to-br from-emerald-950/40 to-slate-900/40 rounded-2xl border border-emerald-900/30 p-5 shadow-lg hover:shadow-xl hover:scale-[1.01] hover:border-emerald-800/50 transition-all duration-300">
+                    <div className="w-10 h-10 bg-emerald-500/10 text-emerald-455 rounded-xl flex items-center justify-center font-bold text-lg mb-3 border border-emerald-500/10">
                       ✅
                     </div>
-                    <span className="text-xs text-emerald-800/70 font-bold block uppercase tracking-wider">Trích xuất thành công</span>
-                    <span className="text-2xl md:text-3xl font-extrabold text-emerald-900 mt-1 block">{statsData.summary.success}</span>
-                    <span className="text-[10px] text-emerald-600 font-semibold mt-1 block">Lưu trữ đầy đủ dữ liệu</span>
+                    <span className="text-xs text-emerald-400/80 font-bold block uppercase tracking-wider">Trích xuất thành công</span>
+                    <span className="text-2xl md:text-3xl font-extrabold text-white mt-1 block">{statsData.summary.success}</span>
+                    <span className="text-[10px] text-emerald-400 font-semibold mt-1 block">Lưu trữ đầy đủ dữ liệu</span>
                   </div>
 
                   {/* Card 3: Thất bại */}
-                  <div className="bg-gradient-to-br from-rose-50 to-orange-50/50 rounded-2xl border border-rose-100/70 p-5 shadow-xs hover:shadow-sm hover:scale-[1.01] transition-all">
-                    <div className="w-10 h-10 bg-rose-600/10 text-rose-600 rounded-xl flex items-center justify-center font-bold text-lg mb-3">
+                  <div className="bg-gradient-to-br from-rose-950/40 to-slate-900/40 rounded-2xl border border-rose-900/30 p-5 shadow-lg hover:shadow-xl hover:scale-[1.01] hover:border-rose-800/50 transition-all duration-300">
+                    <div className="w-10 h-10 bg-rose-500/10 text-rose-455 rounded-xl flex items-center justify-center font-bold text-lg mb-3 border border-rose-500/10">
                       ❌
                     </div>
-                    <span className="text-xs text-rose-800/70 font-bold block uppercase tracking-wider">Trích xuất thất bại</span>
-                    <span className="text-2xl md:text-3xl font-extrabold text-rose-900 mt-1 block">{statsData.summary.failed}</span>
-                    <span className="text-[10px] text-rose-600 font-semibold mt-1 block">Bị lỗi API / Quota limit</span>
+                    <span className="text-xs text-rose-400/80 font-bold block uppercase tracking-wider">Trích xuất thất bại</span>
+                    <span className="text-2xl md:text-3xl font-extrabold text-white mt-1 block">{statsData.summary.failed}</span>
+                    <span className="text-[10px] text-rose-405 font-semibold mt-1 block">Bị lỗi API / Quota limit</span>
                   </div>
 
                   {/* Card 4: Tỉ lệ */}
-                  <div className="bg-gradient-to-br from-amber-50 to-yellow-50/50 rounded-2xl border border-amber-100/70 p-5 shadow-xs hover:shadow-sm hover:scale-[1.01] transition-all">
-                    <div className="w-10 h-10 bg-amber-600/10 text-amber-600 rounded-xl flex items-center justify-center font-bold text-lg mb-3">
+                  <div className="bg-gradient-to-br from-amber-950/40 to-slate-900/40 rounded-2xl border border-amber-900/30 p-5 shadow-lg hover:shadow-xl hover:scale-[1.01] hover:border-amber-800/50 transition-all duration-300">
+                    <div className="w-10 h-10 bg-amber-500/10 text-amber-455 rounded-xl flex items-center justify-center font-bold text-lg mb-3 border border-amber-500/10">
                       🎯
                     </div>
-                    <span className="text-xs text-amber-800/70 font-bold block uppercase tracking-wider">Tỷ lệ thành công</span>
-                    <span className="text-2xl md:text-3xl font-extrabold text-amber-900 mt-1 block">
+                    <span className="text-xs text-amber-400/80 font-bold block uppercase tracking-wider">Tỷ lệ thành công</span>
+                    <span className="text-2xl md:text-3xl font-extrabold text-white mt-1 block">
                       {(statsData.summary.total > 0 ? (statsData.summary.success / statsData.summary.total * 100) : 0).toFixed(1)}%
                     </span>
-                    <span className="text-[10px] text-amber-600 font-semibold mt-1 block">Hiệu suất trích xuất AI</span>
+                    <span className="text-[10px] text-amber-400 font-semibold mt-1 block">Hiệu suất trích xuất AI</span>
                   </div>
                 </div>
 
                 {/* SVG Graph Section */}
                 {statsData.daily && statsData.daily.length > 0 && (
-                  <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm">
-                    <h3 className="text-sm font-bold text-slate-800 mb-6 flex items-center gap-2">
+                  <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-2xl p-6 shadow-xl">
+                    <h3 className="text-sm font-bold text-white mb-6 flex items-center gap-2">
                       📈 Biểu đồ xu hướng xử lý file hàng ngày
                     </h3>
                     
@@ -995,11 +1156,11 @@ function App() {
                               <defs>
                                 <linearGradient id="barGradSuccess" x1="0" y1="0" x2="0" y2="1">
                                   <stop offset="0%" stopColor="#10b981"/>
-                                  <stop offset="100%" stopColor="#059669" stopOpacity="0.8"/>
+                                  <stop offset="100%" stopColor="#047857" stopOpacity="0.8"/>
                                 </linearGradient>
                                 <linearGradient id="barGradFailed" x1="0" y1="0" x2="0" y2="1">
                                   <stop offset="0%" stopColor="#f43f5e"/>
-                                  <stop offset="100%" stopColor="#e11d48" stopOpacity="0.8"/>
+                                  <stop offset="100%" stopColor="#be123c" stopOpacity="0.8"/>
                                 </linearGradient>
                               </defs>
 
@@ -1014,7 +1175,7 @@ function App() {
                                       y1={yPos}
                                       x2={svgWidth - paddingRight}
                                       y2={yPos}
-                                      stroke="#f1f5f9"
+                                      stroke="#1e293b"
                                       strokeWidth="1.5"
                                       strokeDasharray={index === 0 ? "0" : "4 4"}
                                     />
@@ -1022,7 +1183,7 @@ function App() {
                                       x={paddingLeft - 8}
                                       y={yPos + 4}
                                       textAnchor="end"
-                                      className="fill-slate-400 font-bold text-[9px] font-mono"
+                                      className="fill-slate-500 font-bold text-[9px] font-mono"
                                     >
                                       {gridVal}
                                     </text>
@@ -1095,7 +1256,7 @@ function App() {
                                       y={paddingTop + graphHeight + 16}
                                       textAnchor="middle"
                                       className={`font-bold text-[10px] transition-colors ${
-                                        isHovered ? 'fill-blue-600' : 'fill-slate-400'
+                                        isHovered ? 'fill-blue-400' : 'fill-slate-500'
                                       }`}
                                     >
                                       {dateLabel}
@@ -1111,7 +1272,9 @@ function App() {
                                           height="45"
                                           rx="6"
                                           fill="#0f172a"
-                                          className="opacity-95 shadow-md"
+                                          stroke="#1e293b"
+                                          strokeWidth="1"
+                                          className="opacity-95 shadow-lg"
                                         />
                                         <text
                                           x={Math.max(xPos + barWidth / 2, 65)}
@@ -1145,17 +1308,17 @@ function App() {
                 )}
 
                 {/* Detailed Logs Table */}
-                <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
-                  <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-white">
-                    <h3 className="text-sm font-bold text-slate-900">
+                <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-2xl shadow-xl overflow-hidden">
+                  <div className="px-6 py-4 border-b border-slate-800/60 flex justify-between items-center">
+                    <h3 className="text-sm font-bold text-white">
                       Chi tiết lưu trữ thống kê theo ngày
                     </h3>
-                    <span className="text-slate-400 text-xs font-bold">Dữ liệu thời gian thực</span>
+                    <span className="text-slate-550 text-xs font-bold">Dữ liệu thời gian thực</span>
                   </div>
 
                   <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse text-sm">
-                      <thead className="bg-slate-50/50 text-[11px] text-slate-500 uppercase font-bold tracking-wider border-b border-slate-100">
+                      <thead className="bg-slate-950/60 text-[11px] text-slate-455 uppercase font-bold tracking-wider border-b border-slate-800/80">
                         <tr>
                           <th className="px-6 py-3">Ngày làm việc</th>
                           <th className="px-6 py-3">Tổng số file</th>
@@ -1164,7 +1327,7 @@ function App() {
                           <th className="px-6 py-3">Tỉ lệ thành công</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
+                      <tbody className="divide-y divide-slate-800/60 bg-[#0c101d]/60 text-slate-300">
                         {[...statsData.daily].reverse().map((d, index) => {
                           const rate = d.total > 0 ? ((d.success / d.total) * 100).toFixed(1) : 0;
                           
@@ -1173,18 +1336,18 @@ function App() {
                           const formattedDate = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : d.date;
 
                           return (
-                            <tr key={index} className="hover:bg-slate-50/50 transition-colors">
-                              <td className="px-6 py-3 font-bold text-slate-800">{formattedDate}</td>
-                              <td className="px-6 py-3 font-semibold text-slate-600">{d.total}</td>
-                              <td className="px-6 py-3 text-emerald-600 font-bold">{d.success}</td>
-                              <td className="px-6 py-3 text-rose-600 font-semibold">{d.failed}</td>
+                            <tr key={index} className="hover:bg-slate-800/20 transition-colors">
+                              <td className="px-6 py-3 font-bold text-slate-200">{formattedDate}</td>
+                              <td className="px-6 py-3 font-semibold text-slate-400">{d.total}</td>
+                              <td className="px-6 py-3 text-emerald-400 font-bold">{d.success}</td>
+                              <td className="px-6 py-3 text-rose-450 font-semibold">{d.failed}</td>
                               <td className="px-6 py-3">
                                 <span className={`px-2 py-0.5 rounded-md font-bold text-xs ${
                                   rate >= 90 
-                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                                    ? 'bg-emerald-950/40 text-emerald-300 border border-emerald-800/60' 
                                     : rate >= 70 
-                                    ? 'bg-amber-50 text-amber-700 border border-amber-200' 
-                                    : 'bg-rose-50 text-rose-700 border border-rose-200'
+                                    ? 'bg-amber-950/40 text-amber-300 border border-amber-800/60' 
+                                    : 'bg-rose-950/40 text-rose-300 border border-rose-800/60'
                                 }`}>
                                   {rate}%
                                 </span>
@@ -1203,24 +1366,24 @@ function App() {
 
         {/* CONFIG TAB */}
         {activeTab === 'config' && (
-          <div className="bg-white rounded-2xl border border-slate-100 p-6 space-y-6 shadow-sm fade-in">
+          <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-2xl p-6 space-y-6 shadow-xl fade-in">
             <div>
-              <h3 className="text-base font-bold text-slate-900 tracking-tight">
+              <h3 className="text-base font-bold text-white tracking-tight">
                 Tham số cấu hình nâng cao dịch vụ
               </h3>
-              <p className="text-slate-405 text-xs mt-0.5 font-normal">
+              <p className="text-slate-400 text-xs mt-0.5 font-normal">
                 Tùy chỉnh luồng chạy song song và kênh kết nối AI nhận dạng tài liệu
               </p>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 border-b border-slate-100 pb-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 border-b border-slate-800/80 pb-6">
               {/* Concurrency Limit */}
               <div className="space-y-2 col-span-1">
-                <label className="block text-xs font-bold text-slate-700 flex justify-between">
+                <label className="block text-xs font-bold text-slate-300 flex justify-between">
                   <span>Số luồng chạy đồng thời:</span>
-                  <span className="text-blue-600 font-extrabold">{concurrency} luồng</span>
+                  <span className="text-blue-400 font-extrabold">{concurrency} luồng</span>
                 </label>
-                <div className="flex items-center gap-3 bg-slate-50/50 border border-slate-200 rounded-xl px-4 py-3">
+                <div className="flex items-center gap-3 bg-slate-950/40 border border-slate-800 rounded-xl px-4 py-3">
                   <input
                     id="input-concurrency"
                     type="range"
@@ -1228,17 +1391,17 @@ function App() {
                     max="10"
                     value={concurrency}
                     onChange={(e) => setConcurrency(parseInt(e.target.value, 10))}
-                    className="w-full accent-blue-600 cursor-pointer"
+                    className="w-full accent-blue-500 cursor-pointer"
                   />
                 </div>
-                <span className="text-[10px] text-slate-400 block leading-snug">
+                <span className="text-[10px] text-slate-500 block leading-snug">
                   Số lượng file PDF sẽ được gửi đồng thời lên máy chủ AI. Khuyên dùng 5-7 luồng.
                 </span>
               </div>
 
               {/* Provider Selection */}
               <div className="space-y-2 col-span-2">
-                <label className="block text-xs font-bold text-slate-700">Chọn kênh kết nối API (Dự phòng thông minh):</label>
+                <label className="block text-xs font-bold text-slate-300">Chọn kênh kết nối API (Dự phòng thông minh):</label>
                 <div className="grid grid-cols-3 gap-3">
                   {[
                     { value: 'gemini', label: 'Google Gemini (Chính)', desc: 'Nhanh & Free' },
@@ -1256,12 +1419,12 @@ function App() {
                       }}
                       className={`p-3 rounded-xl border text-left transition-all ${
                         provider === p.value
-                          ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                          : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-700'
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-600/20'
+                          : 'bg-slate-950/40 border-slate-800 hover:bg-slate-800/40 text-slate-350'
                       }`}
                     >
                       <div className="font-bold text-xs md:text-sm">{p.label}</div>
-                      <div className={`text-[10px] mt-0.5 font-medium ${provider === p.value ? 'text-blue-100' : 'text-slate-400'}`}>
+                      <div className={`text-[10px] mt-0.5 font-medium ${provider === p.value ? 'text-blue-100' : 'text-slate-500'}`}>
                         {p.desc}
                       </div>
                     </button>
@@ -1274,8 +1437,8 @@ function App() {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="font-bold text-slate-800 text-xs block">Kiểm tra hạn mức API (Quota):</span>
-                  <span className="text-[10px] text-slate-400 block mt-0.5">Xác thực trạng thái hoạt động của các API Key trong hệ thống</span>
+                  <span className="font-bold text-slate-200 text-xs block">Kiểm tra hạn mức API (Quota):</span>
+                  <span className="text-[10px] text-slate-500 block mt-0.5">Xác thực trạng thái hoạt động của các API Key trong hệ thống</span>
                 </div>
                 <button
                   id="btn-check-quota"
@@ -1295,15 +1458,15 @@ function App() {
                     }
                   }}
                   disabled={quotaChecking}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-xs font-bold transition-all shadow-sm ${
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-xs font-bold transition-all shadow-md ${
                     quotaChecking
-                      ? 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed'
-                      : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200'
+                      ? 'bg-slate-900/30 text-slate-600 border-slate-850 cursor-not-allowed'
+                      : 'bg-blue-950/40 hover:bg-blue-900/40 text-blue-300 border-blue-800/60'
                   }`}
                 >
                   {quotaChecking ? (
                     <>
-                      <span className="w-3.5 h-3.5 border-2 border-blue-400 border-t-transparent rounded-full spin-slow shrink-0" />
+                      <span className="w-3.5 h-3.5 border-2 border-blue-500 border-t-transparent rounded-full spin-slow shrink-0" />
                       Đang kiểm tra...
                     </>
                   ) : '🔍 Kiểm Tra Quota Ngay'}
@@ -1316,25 +1479,25 @@ function App() {
                     const isGeoBlock = r.message?.toLowerCase().includes('location') || r.details?.toLowerCase().includes('location');
                     const isGroqForbidden = r.provider === 'groq' && (r.message?.toLowerCase().includes('forbidden') || r.details?.toLowerCase().includes('403'));
                     
-                    let statusClass = 'bg-rose-50/50 border-rose-100 text-rose-800';
+                    let statusClass = 'bg-rose-950/30 border-rose-900/50 text-rose-300';
                     let dotClass = 'bg-rose-500';
                     let displayMessage = r.message;
                     let displayResetInfo = r.resetInfo;
                     
                     if (r.status === 'ok') {
-                      statusClass = 'bg-emerald-50/50 border-emerald-100 text-emerald-800';
+                      statusClass = 'bg-emerald-950/30 border-emerald-900/50 text-emerald-300';
                       dotClass = 'bg-emerald-500';
                     } else if (r.status === 'quota') {
-                      statusClass = 'bg-amber-50/50 border-amber-100 text-amber-800';
-                      dotClass = 'bg-amber-500';
+                      statusClass = 'bg-amber-950/30 border-amber-900/50 text-amber-300';
+                      dotClass = 'bg-amber-555';
                     } else if (isGeoBlock) {
-                      statusClass = 'bg-amber-50/50 border-amber-100 text-amber-850';
-                      dotClass = 'bg-amber-500';
+                      statusClass = 'bg-amber-950/30 border-amber-900/50 text-amber-300';
+                      dotClass = 'bg-amber-555';
                       displayMessage = 'IP Edge bị Google giới hạn địa lý';
                       displayResetInfo = 'Hệ thống tự động chuyển tiếp qua OpenRouter miễn phí';
                     } else if (isGroqForbidden) {
-                      statusClass = 'bg-amber-50/50 border-amber-100 text-amber-850';
-                      dotClass = 'bg-amber-500';
+                      statusClass = 'bg-amber-950/30 border-amber-900/50 text-amber-300';
+                      dotClass = 'bg-amber-555';
                       displayMessage = 'IP Edge bị chặn. Sẽ tự động chuyển tiếp';
                       displayResetInfo = 'Hệ thống tự động chuyển tiếp qua OpenRouter/Llama';
                     }
@@ -1347,29 +1510,29 @@ function App() {
                         <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${dotClass}`} />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="font-extrabold text-slate-800 truncate">{r.name}</span>
+                            <span className="font-extrabold text-slate-200 truncate">{r.name}</span>
                             {r.latency !== undefined && (
                               <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono shrink-0 ${
                                 r.latency < 500
-                                  ? 'bg-emerald-100 text-emerald-800'
+                                  ? 'bg-emerald-900/40 text-emerald-300'
                                   : r.latency < 1200
-                                  ? 'bg-amber-100 text-amber-800'
-                                  : 'bg-rose-100 text-rose-800'
+                                  ? 'bg-amber-900/40 text-amber-300'
+                                  : 'bg-rose-900/40 text-rose-300'
                               }`}>
                                 ⚡ {r.latency}ms
                               </span>
                             )}
                           </div>
-                          <div className="font-bold text-slate-500 mt-1 truncate">{displayMessage}</div>
+                          <div className="font-bold text-slate-400 mt-1 truncate">{displayMessage}</div>
                           {displayResetInfo && (
                             <div className={`text-[10px] font-semibold mt-1 ${
-                              r.status === 'ok' ? 'text-slate-400' : 'text-amber-700 font-bold'
+                              r.status === 'ok' ? 'text-slate-500' : 'text-amber-400 font-bold'
                             }`}>
                               ⏱ {displayResetInfo}
                             </div>
                           )}
                           {r.details && (
-                            <div className="text-[9px] text-slate-400 font-normal mt-1 border-t border-slate-100/50 pt-1 font-mono truncate">
+                            <div className="text-[9px] text-slate-500 font-normal mt-1 border-t border-slate-800/40 pt-1 font-mono truncate">
                               ⚙ {r.details}
                             </div>
                           )}
@@ -1377,19 +1540,19 @@ function App() {
                       </div>
                     );
                   })}
-                  <div className="col-span-full space-y-2 pt-2 border-t border-slate-100/60">
-                    <div className="text-[10px] text-slate-400 font-medium">
+                  <div className="col-span-full space-y-2 pt-2 border-t border-slate-800/60">
+                    <div className="text-[10px] text-slate-500 font-medium">
                       Kiểm tra lúc: {new Date(quotaResults.checkedAt).toLocaleTimeString('vi-VN')}
                     </div>
-                    <div className="text-[11px] bg-slate-50 border border-slate-150 rounded-xl px-4 py-3 text-slate-500 leading-relaxed">
-                      <span className="font-extrabold text-slate-600">⚠ Lưu ý hạn mức:</span> Kết quả trên chỉ kiểm tra xem API key còn <strong>hoạt động hay bị chặn (429)</strong>. Số liệu RPM/TPM/RPD là giới hạn tối đa của plan — <strong>không phải số thực tế còn lại</strong>.
+                    <div className="text-[11px] bg-slate-950/40 border border-slate-850 rounded-xl px-4 py-3 text-slate-400 leading-relaxed">
+                      <span className="font-extrabold text-slate-300">⚠ Lưu ý hạn mức:</span> Kết quả trên chỉ kiểm tra xem API key còn <strong>hoạt động hay bị chặn (429)</strong>. Số liệu RPM/TPM/RPD là giới hạn tối đa của plan — <strong>không phải số thực tế còn lại</strong>.
                       <br />
                       Để xem số dùng thực tế từng key Gemini, truy cập{' '}
                       <a
                         href="https://aistudio.google.com/app/rate-limit"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-blue-600 underline font-extrabold hover:text-blue-800"
+                        className="text-blue-400 underline font-extrabold hover:text-blue-300"
                       >
                         aistudio.google.com/app/rate-limit
                       </a>
@@ -1399,14 +1562,13 @@ function App() {
               )}
 
               {quotaResults?.error && (
-                <div className="text-xs text-rose-700 font-bold bg-rose-50 border border-rose-100 rounded-xl px-4 py-3 fade-in">
+                <div className="text-xs text-rose-300 font-bold bg-rose-950/30 border border-rose-900/50 rounded-xl px-4 py-3 fade-in">
                   Lỗi kết nối backend: {quotaResults.error}
                 </div>
               )}
             </div>
           </div>
         )}
-        
       </div>
     </div>
   );

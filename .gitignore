@@ -55,3 +55,6 @@ lerna-debug.log*
 # Optional caches
 .eslintcache
 .stylelintcache
+
+# Git filter-repo temp files
+filter_expressions.txt
