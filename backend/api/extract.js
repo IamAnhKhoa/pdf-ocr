@@ -198,8 +198,6 @@ export default async function handler(request) {
 
   // Cho phép check-quota từ bất kỳ method nào (GET hoặc POST)
   if (url.pathname === '/api/check-quota') {
-    const results = [];
-
     // Hàm tính thời gian reset dễ đọc từ các loại header khác nhau
     const parseResetTime = (resp) => {
       const groqReset = resp.headers.get('x-ratelimit-reset-requests') || resp.headers.get('x-ratelimit-reset-tokens');
@@ -231,16 +229,6 @@ export default async function handler(request) {
       return 'Reset hàng ngày';
     };
 
-    // Kiểm tra từng Gemini key
-    // Danh sách các model free cần kiểm tra tuần tự
-    const geminiModelsToTest = [
-      { id: 'gemini-2.5-flash', name: '2.5 Flash', limit: '5 RPM · 20 RPD · 250K TPM' },
-      { id: 'gemini-3.5-flash', name: '3.5 Flash', limit: '5 RPM · 20 RPD · 250K TPM' },
-      { id: 'gemini-3-flash-preview', name: '3 Flash', limit: '5 RPM · 20 RPD · 250K TPM' },
-      { id: 'gemini-3.1-flash-lite-preview', name: '3.1 Flash Lite', limit: '15 RPM · 500 RPD · 250K TPM' },
-      { id: 'gemini-2.5-flash-lite', name: '2.5 Flash Lite', limit: '10 RPM · 20 RPD · 250K TPM' }
-    ];
-
     // Nhận keys từ header nếu được gọi bởi Cloudflare Worker proxy
     const headerGeminiKeysQ = request.headers.get('X-Gemini-Keys');
     const headerOpenrouterKeyQ = request.headers.get('X-Openrouter-Key');
@@ -256,210 +244,212 @@ export default async function handler(request) {
       geminiKeysAll = getGeminiKeys();
     }
 
-    for (let i = 0; i < geminiKeysAll.length; i++) {
-      const key = geminiKeysAll[i];
-      const label = `Gemini Key ${i + 1}`;
-      
-      let keyChecked = false;
-      let lastErrMessage = '';
-      let lastErrStatus = 500;
-      let lastResetTime = '';
+    const checkPromises = [];
 
-      for (const modelSpec of geminiModelsToTest) {
-        const startTime = Date.now();
-        try {
-          const resp = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${modelSpec.id}:generateContent?key=${key}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ contents: [{ parts: [{ text: 'hi' }] }], generationConfig: { temperature: 0, maxOutputTokens: 5 } })
-            }
-          );
-          const latency = Date.now() - startTime;
+    // 1. Song song hóa kiểm tra từng Gemini key
+    geminiKeysAll.forEach((key, index) => {
+      const label = `Gemini Key ${index + 1}`;
+      checkPromises.push((async () => {
+        let lastErrMessage = '';
+        let lastErrStatus = 500;
+        
+        // Chỉ test tối đa 2 model để đảm bảo tốc độ tối ưu
+        const modelsToTest = [
+          { id: 'gemini-2.5-flash', name: '2.5 Flash', limit: '5 RPM · 20 RPD' },
+          { id: 'gemini-2.5-flash-lite', name: '2.5 Flash Lite', limit: '10 RPM · 20 RPD' }
+        ];
 
-          if (resp.ok) {
-            // Model này hoạt động tốt!
-            const isMainModel = modelSpec.id === 'gemini-2.5-flash';
-            results.push({
-              name: label,
-              provider: 'gemini',
-              status: 'ok',
-              message: isMainModel ? `Hoạt động tốt (HTTP ${resp.status})` : `Dự phòng ${modelSpec.name} (HTTP 200)`,
-              latency,
-              resetInfo: `⏱ Free: ${modelSpec.limit} · Reset RPD: 15:00 VN (00:00 PT)`,
-              details: `Phản hồi: ${latency}ms | Model hoạt động: ${modelSpec.id}`
-            });
-            keyChecked = true;
-            break; // Đã tìm thấy model chạy tốt, dừng check key này
-          } else {
-            const errBody = await resp.json().catch(() => ({}));
-            lastErrMessage = errBody?.error?.message || `HTTP ${resp.status}`;
-            lastErrStatus = resp.status;
-            
-            const isQuota = resp.status === 429 || lastErrMessage.toLowerCase().includes('quota') || lastErrMessage.toLowerCase().includes('limit');
-            
-            if (isQuota) {
-              lastResetTime = parseResetTime(resp);
-              // Lỗi rate limit, tiếp tục vòng lặp thử model tiếp theo
-              console.log(`${label} - Model ${modelSpec.id} bị 429. Thử model tiếp theo...`);
-            } else {
-              // Lỗi nghiêm trọng khác (như API key invalid), dừng check các model khác ngay lập tức
-              results.push({
+        for (const modelSpec of modelsToTest) {
+          const startTime = Date.now();
+          try {
+            const resp = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${modelSpec.id}:generateContent?key=${key}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents: [{ parts: [{ text: 'hi' }] }], generationConfig: { temperature: 0, maxOutputTokens: 5 } }),
+                signal: AbortSignal.timeout(6000)
+              }
+            );
+            const latency = Date.now() - startTime;
+
+            if (resp.ok) {
+              const isMainModel = modelSpec.id === 'gemini-2.5-flash';
+              return {
                 name: label,
                 provider: 'gemini',
-                status: 'error',
-                message: lastErrMessage,
+                status: 'ok',
+                message: isMainModel ? `Hoạt động tốt (HTTP ${resp.status})` : `Dự phòng ${modelSpec.name} (HTTP 200)`,
                 latency,
-                resetInfo: 'API Key không hợp lệ / Lỗi cấu hình',
-                details: `HTTP ${resp.status} | Phản hồi: ${latency}ms`
-              });
-              keyChecked = true;
-              break;
+                resetInfo: `⏱ Free: ${modelSpec.limit} · Reset RPD: 15:00 VN`,
+                details: `Phản hồi: ${latency}ms | Model: ${modelSpec.id}`
+              };
+            } else {
+              const errBody = await resp.json().catch(() => ({}));
+              lastErrMessage = errBody?.error?.message || `HTTP ${resp.status}`;
+              lastErrStatus = resp.status;
+              
+              const isQuota = resp.status === 429 || lastErrMessage.toLowerCase().includes('quota') || lastErrMessage.toLowerCase().includes('limit');
+              
+              if (!isQuota) {
+                return {
+                  name: label,
+                  provider: 'gemini',
+                  status: 'error',
+                  message: lastErrMessage,
+                  latency,
+                  resetInfo: 'API Key không hợp lệ / Lỗi cấu hình',
+                  details: `HTTP ${resp.status} | Phản hồi: ${latency}ms`
+                };
+              }
             }
+          } catch (e) {
+            lastErrMessage = e.message;
           }
-        } catch (e) {
-          lastErrMessage = e.message;
-          console.error(`Lỗi test ${modelSpec.id} trên ${label}:`, e.message);
         }
-      }
 
-      // Nếu duyệt hết tất cả model mà không có cái nào chạy được
-      if (!keyChecked) {
-        results.push({
+        return {
           name: label,
           provider: 'gemini',
           status: 'quota',
-          message: 'Hết hạn mức tất cả model free',
+          message: 'Hết hạn mức hoặc bị 429',
           latency: 0,
           resetInfo: 'Hồi RPM sau 1m · Hồi RPD lúc 15:00 VN',
-          details: `Cả 5 model đều bị giới hạn 429 | Lỗi cuối: ${lastErrMessage}`
-        });
-      }
-    }
+          details: `Cả 2 model đều bị giới hạn 429 | Lỗi cuối: ${lastErrMessage}`
+        };
+      })());
+    });
 
-    // Kiểm tra OpenRouter
-    const orStartTime = Date.now();
-    try {
-      const orKey = headerOpenrouterKeyQ || process.env.OPENROUTER_API_KEY || HARDCODED_OPENROUTER_KEY;
-      const resp = await fetch('https://openrouter.ai/api/v1/auth/key', {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${orKey}` }
-      });
-      const latency = Date.now() - orStartTime;
-      if (resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        const keyData = data?.data || {};
-        const label = keyData.label || 'Chưa đặt tên';
-        const usage = keyData.usage != null ? (keyData.usage / 100).toFixed(4) : '0';
-        const limit = keyData.limit != null ? (keyData.limit / 100).toFixed(2) : 'Không giới hạn';
-        
-        let limitMsg = '';
-        if (keyData.is_free_tier) {
-          limitMsg = 'Free tier (Giới hạn: 20 req/phút)';
+    // 2. Song song hóa kiểm tra OpenRouter
+    checkPromises.push((async () => {
+      const orStartTime = Date.now();
+      try {
+        const orKey = headerOpenrouterKeyQ || process.env.OPENROUTER_API_KEY || HARDCODED_OPENROUTER_KEY;
+        const resp = await fetch('https://openrouter.ai/api/v1/auth/key', {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${orKey}` },
+          signal: AbortSignal.timeout(6000)
+        });
+        const latency = Date.now() - orStartTime;
+        if (resp.ok) {
+          const data = await resp.json().catch(() => ({}));
+          const keyData = data?.data || {};
+          const label = keyData.label || 'Chưa đặt tên';
+          const usage = keyData.usage != null ? (keyData.usage / 100).toFixed(4) : '0';
+          const limit = keyData.limit != null ? (keyData.limit / 100).toFixed(2) : 'Không giới hạn';
+          
+          let limitMsg = '';
+          if (keyData.is_free_tier) {
+            limitMsg = 'Free tier (Giới hạn: 20 req/phút)';
+          } else {
+            limitMsg = `Đã dùng: $${usage} / $${limit}`;
+          }
+
+          const rateLimitDetail = keyData.rate_limit
+            ? `Tốc độ: ${keyData.rate_limit.requests} req / ${keyData.rate_limit.interval}`
+            : 'Không giới hạn tốc độ';
+
+          return {
+            name: 'OpenRouter',
+            provider: 'openrouter',
+            status: 'ok',
+            message: `Hoạt động tốt (${label})`,
+            latency,
+            resetInfo: limitMsg,
+            details: `Phản hồi: ${latency}ms | ${rateLimitDetail}`
+          };
         } else {
-          limitMsg = `Đã dùng: $${usage} / $${limit}`;
+          const errBody = await resp.json().catch(() => ({}));
+          const msg = errBody?.error?.message || `HTTP ${resp.status}`;
+          const isQuota = resp.status === 429 || resp.status === 402;
+          return {
+            name: 'OpenRouter',
+            provider: 'openrouter',
+            status: isQuota ? 'quota' : 'error',
+            message: isQuota ? 'Hết hạn mức / Tài khoản hết số dư' : msg,
+            latency,
+            resetInfo: isQuota ? 'Cần nạp thêm tiền hoặc đổi key' : 'Key không hợp lệ',
+            details: `HTTP ${resp.status} | Phản hồi: ${latency}ms`
+          };
         }
-
-        const rateLimitDetail = keyData.rate_limit
-          ? `Tốc độ: ${keyData.rate_limit.requests} req / ${keyData.rate_limit.interval}`
-          : 'Không giới hạn tốc độ';
-
-        results.push({
+      } catch (e) {
+        return {
           name: 'OpenRouter',
           provider: 'openrouter',
-          status: 'ok',
-          message: `Hoạt động tốt (${label})`,
-          latency,
-          resetInfo: limitMsg,
-          details: `Phản hồi: ${latency}ms | ${rateLimitDetail}`
-        });
-      } else {
-        const errBody = await resp.json().catch(() => ({}));
-        const msg = errBody?.error?.message || `HTTP ${resp.status}`;
-        const isQuota = resp.status === 429 || resp.status === 402;
-        results.push({
-          name: 'OpenRouter',
-          provider: 'openrouter',
-          status: isQuota ? 'quota' : 'error',
-          message: isQuota ? 'Hết hạn mức / Tài khoản hết số dư' : msg,
-          latency,
-          resetInfo: isQuota ? 'Cần nạp thêm tiền hoặc đổi key' : 'Key không hợp lệ',
-          details: `HTTP ${resp.status} | Phản hồi: ${latency}ms`
-        });
+          status: 'error',
+          message: e.message,
+          latency: Date.now() - orStartTime,
+          resetInfo: 'Lỗi mạng',
+          details: 'Không thể kết nối đến openrouter.ai'
+        };
       }
-    } catch (e) {
-      results.push({
-        name: 'OpenRouter',
-        provider: 'openrouter',
-        status: 'error',
-        message: e.message,
-        latency: Date.now() - orStartTime,
-        resetInfo: 'Lỗi mạng',
-        details: 'Không thể kết nối đến openrouter.ai'
-      });
-    }
+    })());
 
-    // Kiểm tra Groq
-    const groqStartTime = Date.now();
-    try {
-      const groqKey = headerGroqKeyQ || process.env.GROQ_API_KEY || HARDCODED_GROQ_KEY;
-      const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json', 
-          'Authorization': `Bearer ${groqKey}`,
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        },
-        body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: 'hi' }], max_tokens: 5 })
-      });
-      const latency = Date.now() - groqStartTime;
-      if (resp.ok) {
-        const reqRemaining = resp.headers.get('x-ratelimit-remaining-requests');
-        const reqLimit = resp.headers.get('x-ratelimit-limit-requests');
-        const reqReset = resp.headers.get('x-ratelimit-reset-requests');
-        
-        const tokRemaining = resp.headers.get('x-ratelimit-remaining-tokens');
-        const tokLimit = resp.headers.get('x-ratelimit-limit-tokens');
-        const tokReset = resp.headers.get('x-ratelimit-reset-tokens');
+    // 3. Song song hóa kiểm tra Groq
+    checkPromises.push((async () => {
+      const groqStartTime = Date.now();
+      try {
+        const groqKey = headerGroqKeyQ || process.env.GROQ_API_KEY || HARDCODED_GROQ_KEY;
+        const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json', 
+            'Authorization': `Bearer ${groqKey}`,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          },
+          body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: 'hi' }], max_tokens: 5 }),
+          signal: AbortSignal.timeout(6000)
+        });
+        const latency = Date.now() - groqStartTime;
+        if (resp.ok) {
+          const reqRemaining = resp.headers.get('x-ratelimit-remaining-requests');
+          const reqLimit = resp.headers.get('x-ratelimit-limit-requests');
+          const reqReset = resp.headers.get('x-ratelimit-reset-requests');
+          
+          const tokRemaining = resp.headers.get('x-ratelimit-remaining-tokens');
+          const tokLimit = resp.headers.get('x-ratelimit-limit-tokens');
+          const tokReset = resp.headers.get('x-ratelimit-reset-tokens');
 
-        results.push({
+          return {
+            name: 'Groq Cloud',
+            provider: 'groq',
+            status: 'ok',
+            message: 'Hoạt động tốt (HTTP 200)',
+            latency,
+            resetInfo: reqRemaining ? `Request: Còn ${reqRemaining}/${reqLimit} (reset ${reqReset})` : 'Hoạt động tốt',
+            details: `Phản hồi: ${latency}ms | Token: Còn ${tokRemaining || 'N/A'}/${tokLimit || 'N/A'} (reset ${tokReset || 'N/A'})`
+          };
+        } else {
+          const errBody = await resp.json().catch(() => ({}));
+          const msg = errBody?.error?.message || `HTTP ${resp.status}`;
+          const isQuota = resp.status === 429 || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('rate') || msg.toLowerCase().includes('limit');
+          
+          const reqReset = resp.headers.get('x-ratelimit-reset-requests') || resp.headers.get('x-ratelimit-reset-tokens');
+
+          return {
+            name: 'Groq Cloud',
+            provider: 'groq',
+            status: isQuota ? 'quota' : 'error',
+            message: isQuota ? 'Bị giới hạn tốc độ (Rate Limit 429)' : msg,
+            latency,
+            resetInfo: isQuota ? `Reset sau: ${reqReset || 'vài giây'}` : 'Lỗi kết nối / Key sai',
+            details: `HTTP ${resp.status} | Phản hồi: ${latency}ms`
+          };
+        }
+      } catch (e) {
+        return {
           name: 'Groq Cloud',
           provider: 'groq',
-          status: 'ok',
-          message: 'Hoạt động tốt (HTTP 200)',
-          latency,
-          resetInfo: reqRemaining ? `Request: Còn ${reqRemaining}/${reqLimit} (reset ${reqReset})` : 'Hoạt động tốt',
-          details: `Phản hồi: ${latency}ms | Token: Còn ${tokRemaining || 'N/A'}/${tokLimit || 'N/A'} (reset ${tokReset || 'N/A'})`
-        });
-      } else {
-        const errBody = await resp.json().catch(() => ({}));
-        const msg = errBody?.error?.message || `HTTP ${resp.status}`;
-        const isQuota = resp.status === 429 || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('rate') || msg.toLowerCase().includes('limit');
-        
-        const reqReset = resp.headers.get('x-ratelimit-reset-requests') || resp.headers.get('x-ratelimit-reset-tokens');
-
-        results.push({
-          name: 'Groq Cloud',
-          provider: 'groq',
-          status: isQuota ? 'quota' : 'error',
-          message: isQuota ? 'Bị giới hạn tốc độ (Rate Limit 429)' : msg,
-          latency,
-          resetInfo: isQuota ? `Reset sau: ${reqReset || 'vài giây'}` : 'Lỗi kết nối / Key sai',
-          details: `HTTP ${resp.status} | Phản hồi: ${latency}ms`
-        });
+          status: 'error',
+          message: e.message,
+          latency: Date.now() - groqStartTime,
+          resetInfo: 'Lỗi mạng',
+          details: 'Không thể kết nối đến api.groq.com'
+        };
       }
-    } catch (e) {
-      results.push({
-        name: 'Groq Cloud',
-        provider: 'groq',
-        status: 'error',
-        message: e.message,
-        latency: Date.now() - groqStartTime,
-        resetInfo: 'Lỗi mạng',
-        details: 'Không thể kết nối đến api.groq.com'
-      });
-    }
+    })());
+
+    const results = await Promise.all(checkPromises);
 
     return new Response(JSON.stringify({ results, checkedAt: new Date().toISOString() }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
