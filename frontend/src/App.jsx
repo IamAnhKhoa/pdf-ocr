@@ -407,9 +407,15 @@ function App() {
   const activeItems = dataList.filter(d => d.status === 'processing');
   const waitingItems = dataList.filter(d => d.status === 'waiting_retry');
 
-  const PROVIDER_LABELS = { gemini: 'Gemini', openrouter: 'OpenRouter', groq: 'Groq' };
+  const PROVIDER_LABELS = {
+    gemini: 'Gemini',
+    'gemini-via-vercel': 'Gemini (Proxy)',
+    openrouter: 'OpenRouter',
+    groq: 'Groq'
+  };
   const PROVIDER_COLORS = {
     gemini: 'bg-blue-50 text-blue-700 border-blue-200',
+    'gemini-via-vercel': 'bg-blue-50 text-blue-700 border-blue-200',
     openrouter: 'bg-violet-50 text-violet-700 border-violet-200',
     groq: 'bg-orange-50 text-orange-700 border-orange-200',
     '': 'bg-slate-50 text-slate-600 border-slate-200'
@@ -577,16 +583,32 @@ function App() {
                   <div className="border-t border-slate-100 pt-2.5">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Mô hình đã sử dụng</p>
                     <div className="flex flex-wrap gap-1.5">
-                      {['gemini', 'openrouter', 'groq'].map(prov => {
-                        const count = dataList.filter(d => d.usedProvider === prov).length;
-                        if (count === 0) return null;
-                        return (
-                          <span key={prov} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold ${PROVIDER_COLORS[prov]}`}>
-                            {PROVIDER_LABELS[prov]}
-                            <span className="font-bold">×{count}</span>
-                          </span>
-                        );
-                      })}
+                      {(() => {
+                        // Gom nhóm theo provider + model
+                        const groups = {};
+                        dataList.forEach(d => {
+                          if (d.status === 'completed' && d.usedProvider) {
+                            const key = `${d.usedProvider}||${d.usedModel || ''}`;
+                            groups[key] = (groups[key] || 0) + 1;
+                          }
+                        });
+                        return Object.entries(groups).map(([key, count]) => {
+                          const [prov, mdl] = key.split('||');
+                          const colorClass = PROVIDER_COLORS[prov] || PROVIDER_COLORS[''];
+                          const label = PROVIDER_LABELS[prov] || prov;
+                          // Rút gọn model name cho gọn
+                          const shortModel = mdl
+                            ? mdl.replace('google/', '').replace(':free', '').replace('meta-llama/', '').replace('-instruct', '').replace('-preview', '')
+                            : '';
+                          return (
+                            <span key={key} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold ${colorClass}`}>
+                              {label}
+                              {shortModel && <span className="text-[10px] font-normal opacity-70">·{shortModel}</span>}
+                              <span className="font-bold">×{count}</span>
+                            </span>
+                          );
+                        });
+                      })()}
                     </div>
                   </div>
                 )}
