@@ -241,7 +241,20 @@ export default async function handler(request) {
       { id: 'gemini-2.5-flash-lite', name: '2.5 Flash Lite', limit: '10 RPM · 20 RPD · 250K TPM' }
     ];
 
-    const geminiKeysAll = getGeminiKeys();
+    // Nhận keys từ header nếu được gọi bởi Cloudflare Worker proxy
+    const headerGeminiKeysQ = request.headers.get('X-Gemini-Keys');
+    const headerOpenrouterKeyQ = request.headers.get('X-Openrouter-Key');
+    const headerGroqKeyQ = request.headers.get('X-Groq-Key');
+
+    // Ưu tiên keys từ header (từ Cloudflare Worker) hơn env vars
+    let geminiKeysAll;
+    if (headerGeminiKeysQ) {
+      const headerKeys = headerGeminiKeysQ.split(',').map(k => k.trim()).filter(Boolean);
+      const envKeys = getGeminiKeys();
+      geminiKeysAll = [...new Set([...headerKeys, ...envKeys])];
+    } else {
+      geminiKeysAll = getGeminiKeys();
+    }
 
     for (let i = 0; i < geminiKeysAll.length; i++) {
       const key = geminiKeysAll[i];
@@ -328,7 +341,7 @@ export default async function handler(request) {
     // Kiểm tra OpenRouter
     const orStartTime = Date.now();
     try {
-      const orKey = process.env.OPENROUTER_API_KEY || HARDCODED_OPENROUTER_KEY;
+      const orKey = headerOpenrouterKeyQ || process.env.OPENROUTER_API_KEY || HARDCODED_OPENROUTER_KEY;
       const resp = await fetch('https://openrouter.ai/api/v1/auth/key', {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${orKey}` }
@@ -390,7 +403,7 @@ export default async function handler(request) {
     // Kiểm tra Groq
     const groqStartTime = Date.now();
     try {
-      const groqKey = process.env.GROQ_API_KEY || HARDCODED_GROQ_KEY;
+      const groqKey = headerGroqKeyQ || process.env.GROQ_API_KEY || HARDCODED_GROQ_KEY;
       const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { 
@@ -491,34 +504,38 @@ export default async function handler(request) {
     // Danh sách các nhà cung cấp/mô hình sẽ quay vòng thử nếu lỗi
     const providersToTry = [];
     if (targetProvider === 'gemini') {
+      // Gemini direct (Vercel IP sạch, không bị block địa lý)
       providersToTry.push({ name: 'gemini', model: targetModel || 'gemini-2.5-flash' });
-      // Thử tiếp toàn bộ 4 model free còn lại của Gemini trực tiếp trước khi sang OpenRouter/Groq
-      if (targetModel !== 'gemini-3.5-flash') providersToTry.push({ name: 'gemini', model: 'gemini-3.5-flash' });
-      providersToTry.push({ name: 'gemini', model: 'gemini-3-flash-preview' });
-      providersToTry.push({ name: 'gemini', model: 'gemini-3.1-flash-lite-preview' });
+      if (targetModel !== 'gemini-2.5-flash') providersToTry.push({ name: 'gemini', model: 'gemini-2.5-flash' });
       providersToTry.push({ name: 'gemini', model: 'gemini-2.5-flash-lite' });
-      
-      providersToTry.push({ name: 'openrouter', model: 'google/gemini-2.5-flash:free' });
-      providersToTry.push({ name: 'groq', model: 'llama-3.3-70b-versatile' });
+      // OpenRouter vision models (số lượng tối đa)
+      providersToTry.push({ name: 'openrouter', model: 'qwen/qwen2.5-vl-72b-instruct:free' });   // OCR tốt nhất
+      providersToTry.push({ name: 'openrouter', model: 'meta-llama/llama-4-maverick:free' });     // Vision, tốc độ cao
+      providersToTry.push({ name: 'openrouter', model: 'meta-llama/llama-4-scout:free' });        // Vision, nhẹ hơn
+      providersToTry.push({ name: 'openrouter', model: 'google/gemini-2.5-flash:free' });         // Gemini qua OpenRouter
+      // Groq vision models
+      providersToTry.push({ name: 'groq', model: 'llama-3.2-90b-vision-preview' });              // Groq vision chất lượng cao
+      providersToTry.push({ name: 'groq', model: 'llama-3.2-11b-vision-preview' });              // Groq vision nhanh
     } else if (targetProvider === 'openrouter') {
-      providersToTry.push({ name: 'openrouter', model: targetModel || 'google/gemini-2.5-flash:free' });
-      // Thử toàn bộ model Gemini
+      // Xoay vòng OpenRouter vision models tối đa
+      providersToTry.push({ name: 'openrouter', model: targetModel || 'qwen/qwen2.5-vl-72b-instruct:free' });
+      providersToTry.push({ name: 'openrouter', model: 'meta-llama/llama-4-maverick:free' });
+      providersToTry.push({ name: 'openrouter', model: 'meta-llama/llama-4-scout:free' });
+      providersToTry.push({ name: 'openrouter', model: 'google/gemini-2.5-flash:free' });
+      // Fallback Gemini direct
       providersToTry.push({ name: 'gemini', model: 'gemini-2.5-flash' });
-      providersToTry.push({ name: 'gemini', model: 'gemini-3.5-flash' });
-      providersToTry.push({ name: 'gemini', model: 'gemini-3-flash-preview' });
-      providersToTry.push({ name: 'gemini', model: 'gemini-3.1-flash-lite-preview' });
       providersToTry.push({ name: 'gemini', model: 'gemini-2.5-flash-lite' });
-      
-      providersToTry.push({ name: 'groq', model: 'llama-3.3-70b-versatile' });
+      // Groq vision
+      providersToTry.push({ name: 'groq', model: 'llama-3.2-90b-vision-preview' });
+      providersToTry.push({ name: 'groq', model: 'llama-3.2-11b-vision-preview' });
     } else { // groq
-      providersToTry.push({ name: 'groq', model: targetModel || 'llama-3.3-70b-versatile' });
-      // Thử toàn bộ model Gemini
+      // Groq vision models ưu tiên
+      providersToTry.push({ name: 'groq', model: targetModel || 'llama-3.2-90b-vision-preview' });
+      providersToTry.push({ name: 'groq', model: 'llama-3.2-11b-vision-preview' });
+      // Fallback Gemini + OpenRouter vision
       providersToTry.push({ name: 'gemini', model: 'gemini-2.5-flash' });
-      providersToTry.push({ name: 'gemini', model: 'gemini-3.5-flash' });
-      providersToTry.push({ name: 'gemini', model: 'gemini-3-flash-preview' });
-      providersToTry.push({ name: 'gemini', model: 'gemini-3.1-flash-lite-preview' });
-      providersToTry.push({ name: 'gemini', model: 'gemini-2.5-flash-lite' });
-      
+      providersToTry.push({ name: 'openrouter', model: 'qwen/qwen2.5-vl-72b-instruct:free' });
+      providersToTry.push({ name: 'openrouter', model: 'meta-llama/llama-4-maverick:free' });
       providersToTry.push({ name: 'openrouter', model: 'google/gemini-2.5-flash:free' });
     }
 
