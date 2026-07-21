@@ -134,6 +134,39 @@ function App() {
     };
   }, [isProcessing]);
 
+  // Kích hoạt Audio Context im lặng để Chrome ưu tiên 100% cho tab khi bị thu nhỏ / mở phần mềm khác
+  useEffect(() => {
+    let audioCtx = null;
+    let oscillator = null;
+    let gainNode = null;
+
+    if (isProcessing) {
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioContextClass) {
+          audioCtx = new AudioContextClass();
+          oscillator = audioCtx.createOscillator();
+          gainNode = audioCtx.createGain();
+          gainNode.gain.value = 0.0001; // Im lặng 100%
+          oscillator.connect(gainNode);
+          gainNode.connect(audioCtx.destination);
+          oscillator.start();
+        }
+      } catch (e) {
+        console.warn('Silent audio keep-alive:', e);
+      }
+    }
+
+    return () => {
+      if (oscillator) {
+        try { oscillator.stop(); oscillator.disconnect(); } catch (_) {}
+      }
+      if (audioCtx) {
+        try { audioCtx.close(); } catch (_) {}
+      }
+    };
+  }, [isProcessing]);
+
   // Gửi thông báo Desktop khi hoàn thành trích xuất hàng loạt
   useEffect(() => {
     if (isProcessing) {
@@ -527,16 +560,9 @@ function App() {
               📄
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl md:text-2xl font-bold text-slate-900 tracking-tight leading-tight">
-                  Hệ Thống Trích Xuất Văn Bản PDF
-                </h1>
-                {lowRamMode && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-extrabold shrink-0 shadow-2xs">
-                    ⚡ Tối Ưu 2GB RAM
-                  </span>
-                )}
-              </div>
+              <h1 className="text-xl md:text-2xl font-bold text-slate-900 tracking-tight leading-tight">
+                Hệ Thống Trích Xuất Văn Bản PDF
+              </h1>
               <p className="text-slate-500 text-xs md:text-sm mt-0.5 font-medium">
                 Ứng dụng AI phân tích số hóa hồ sơ công văn văn thư hành chính
               </p>
