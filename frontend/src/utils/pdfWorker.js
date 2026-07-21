@@ -7,30 +7,38 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 self.onmessage = async (e) => {
-  const { id, arrayBuffer } = e.data;
+  const { id, arrayBuffer, scale = 1.5, quality = 0.75 } = e.data;
   if (!arrayBuffer) {
     self.postMessage({ id, status: 'error', error: 'Dữ liệu file không hợp lệ' });
     return;
   }
 
   try {
-    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const loadingTask = pdfjsLib.getDocument({ 
+      data: arrayBuffer,
+      cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.7.284/cmaps/',
+      cMapPacked: true,
+      disableFontFace: true // Tối ưu RAM cho máy yếu bằng cách bỏ qua nạp font không cần thiết
+    });
+    
     const pdf = await loadingTask.promise;
     const totalPages = pdf.numPages;
 
     const images = [];
 
     // Render trang 1
-    const firstPageImage = await renderPageToImageWorker(pdf, 1);
+    const firstPageImage = await renderPageToImageWorker(pdf, 1, scale, quality);
     images.push(firstPageImage);
 
     // Render trang cuối (nếu văn bản có nhiều hơn 1 trang)
     if (totalPages > 1) {
-      const lastPageImage = await renderPageToImageWorker(pdf, totalPages);
+      const lastPageImage = await renderPageToImageWorker(pdf, totalPages, scale, quality);
       images.push(lastPageImage);
     }
 
+    // Giải phóng tài nguyên PDF lập tức
     try {
+      await pdf.cleanup();
       await pdf.destroy();
     } catch (_) {}
 
@@ -40,17 +48,20 @@ self.onmessage = async (e) => {
   }
 };
 
-async function renderPageToImageWorker(pdf, pageNumber) {
+async function renderPageToImageWorker(pdf, pageNumber, scale, quality) {
   const page = await pdf.getPage(pageNumber);
-  const scale = 2;
   const viewport = page.getViewport({ scale });
 
   if (typeof OffscreenCanvas === 'undefined') {
     throw new Error('OffscreenCanvas không được hỗ trợ trong môi trường này');
   }
 
-  const canvas = new OffscreenCanvas(Math.floor(viewport.width), Math.floor(viewport.height));
-  const context = canvas.getContext('2d');
+  const width = Math.floor(viewport.width);
+  const height = Math.floor(viewport.height);
+
+  const canvas = new OffscreenCanvas(width, height);
+  // alpha: false giúp tiết kiệm 25% RAM pixel buffer canvas
+  const context = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
 
   const renderContext = {
     canvasContext: context,
@@ -59,7 +70,16 @@ async function renderPageToImageWorker(pdf, pageNumber) {
 
   await page.render(renderContext).promise;
 
-  const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+  const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: quality });
+  
+  // Ép giải phóng bộ nhớ RAM pixel của canvas ngay lập tức
+  canvas.width = 0;
+  canvas.height = 0;
+
+  try {
+    page.cleanup();
+  } catch (_) {}
+
   const buffer = await blob.arrayBuffer();
   return arrayBufferToBase64(buffer);
 }

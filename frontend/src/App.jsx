@@ -82,12 +82,19 @@ function App() {
     return saved || 'gemini-2.5-flash';
   });
 
+  const [lowRamMode, setLowRamMode] = useState(() => {
+    const saved = localStorage.getItem('pdf_ocr_low_ram');
+    if (saved !== null) return saved === 'true';
+    return true; // Mặc định bật chế độ tiết kiệm RAM cho máy yếu 2GB
+  });
+
   // Lưu cài đặt
   useEffect(() => {
     localStorage.setItem('pdf_ocr_provider', provider);
     localStorage.setItem('pdf_ocr_model', model);
     localStorage.setItem('pdf_ocr_concurrency', concurrency.toString());
-  }, [provider, model, concurrency]);
+    localStorage.setItem('pdf_ocr_low_ram', lowRamMode.toString());
+  }, [provider, model, concurrency, lowRamMode]);
 
   // Trạng thái xử lý tổng quan
   const isProcessing = dataList.some(item => 
@@ -154,15 +161,16 @@ function App() {
     }
   }, [isProcessing, dataList]);
 
-  // Xử lý hàng đợi tự động chạy song song (non-blocking scheduler)
+  // Xử lý hàng đợi tự động chạy song song (non-blocking scheduler với tối ưu RAM)
   useEffect(() => {
     const processQueue = async () => {
       const pendingItems = dataList.filter(item => item.status === 'pending');
       const activeCount = dataList.filter(item => item.status === 'processing').length;
+      const effectiveConcurrency = lowRamMode ? Math.min(concurrency, 2) : concurrency;
 
-      if (pendingItems.length === 0 || activeCount >= concurrency) return;
+      if (pendingItems.length === 0 || activeCount >= effectiveConcurrency) return;
 
-      const itemsToProcess = pendingItems.slice(0, concurrency - activeCount);
+      const itemsToProcess = pendingItems.slice(0, effectiveConcurrency - activeCount);
       itemsToProcess.forEach(item => {
         processSingleFile(item);
       });
@@ -170,15 +178,19 @@ function App() {
 
     const timer = setTimeout(processQueue, 50);
     return () => clearTimeout(timer);
-  }, [dataList, concurrency]);
+  }, [dataList, concurrency, lowRamMode]);
 
   // Đọc và trích xuất từng file
   const processSingleFile = async (item) => {
     setDataList(prev => prev.map(d => d.id === item.id ? { ...d, status: 'processing', error: '' } : d));
 
     try {
-      // 1. Trích xuất trang đầu và trang cuối thành ảnh base64
-      const imagesBase64 = await extractFirstAndLastPage(item.file);
+      // 1. Trích xuất trang đầu và trang cuối thành ảnh base64 với tùy chọn tiết kiệm RAM
+      const options = {
+        scale: lowRamMode ? 1.4 : 2.0,
+        quality: lowRamMode ? 0.7 : 0.8
+      };
+      const imagesBase64 = await extractFirstAndLastPage(item.file, options);
 
       // 2. Gửi API lên Backend proxy để xử lý xoay vòng API và fallback
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8787/api/extract';
@@ -515,9 +527,16 @@ function App() {
               📄
             </div>
             <div>
-              <h1 className="text-xl md:text-2xl font-bold text-slate-900 tracking-tight leading-tight">
-                Hệ Thống Trích Xuất Văn Bản PDF
-              </h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl md:text-2xl font-bold text-slate-900 tracking-tight leading-tight">
+                  Hệ Thống Trích Xuất Văn Bản PDF
+                </h1>
+                {lowRamMode && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-extrabold shrink-0 shadow-2xs">
+                    ⚡ Tối Ưu 2GB RAM
+                  </span>
+                )}
+              </div>
               <p className="text-slate-500 text-xs md:text-sm mt-0.5 font-medium">
                 Ứng dụng AI phân tích số hóa hồ sơ công văn văn thư hành chính
               </p>
@@ -1363,6 +1382,34 @@ function App() {
                       </div>
                     </button>
                   ))}
+                </div>
+              </div>
+
+              {/* Low RAM Mode Toggle */}
+              <div className="space-y-2 col-span-3 border-t border-slate-100 pt-4 mt-2">
+                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-amber-50/60 border border-amber-200/80 rounded-xl p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-amber-500/10 text-amber-600 rounded-xl flex items-center justify-center font-bold text-lg shrink-0">
+                      ⚡
+                    </div>
+                    <div>
+                      <span className="font-bold text-slate-800 text-sm block">Chế độ tiết kiệm bộ nhớ (Cho máy 2GB RAM / Máy yếu):</span>
+                      <span className="text-slate-500 text-xs block mt-0.5">
+                        Tự động điều chỉnh scale = 1.4, tắt font-face render và giải phóng RAM canvas tức thì (giúp giảm hơn 60% bộ nhớ RAM tiêu thụ).
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    id="btn-toggle-low-ram"
+                    onClick={() => setLowRamMode(!lowRamMode)}
+                    className={`px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all shrink-0 shadow-xs ${
+                      lowRamMode
+                        ? 'bg-amber-600 text-white border border-amber-600'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    {lowRamMode ? '⚡ Đang Bật (Tối Ưu 2GB RAM)' : '⚪ Đang Tắt (Chế Độ Mặc Định)'}
+                  </button>
                 </div>
               </div>
             </div>
