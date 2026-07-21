@@ -194,16 +194,15 @@ function App() {
     }
   }, [isProcessing, dataList]);
 
-  // Xử lý hàng đợi tự động chạy song song (non-blocking scheduler với tối ưu RAM)
+  // Xử lý hàng đợi tự động chạy song song (hỗ trợ đến 10 luồng đồng thời)
   useEffect(() => {
     const processQueue = async () => {
       const pendingItems = dataList.filter(item => item.status === 'pending');
       const activeCount = dataList.filter(item => item.status === 'processing').length;
-      const effectiveConcurrency = lowRamMode ? Math.min(concurrency, 2) : concurrency;
 
-      if (pendingItems.length === 0 || activeCount >= effectiveConcurrency) return;
+      if (pendingItems.length === 0 || activeCount >= concurrency) return;
 
-      const itemsToProcess = pendingItems.slice(0, effectiveConcurrency - activeCount);
+      const itemsToProcess = pendingItems.slice(0, concurrency - activeCount);
       itemsToProcess.forEach(item => {
         processSingleFile(item);
       });
@@ -211,17 +210,17 @@ function App() {
 
     const timer = setTimeout(processQueue, 50);
     return () => clearTimeout(timer);
-  }, [dataList, concurrency, lowRamMode]);
+  }, [dataList, concurrency]);
 
   // Đọc và trích xuất từng file
   const processSingleFile = async (item) => {
     setDataList(prev => prev.map(d => d.id === item.id ? { ...d, status: 'processing', error: '' } : d));
 
     try {
-      // 1. Trích xuất trang đầu và trang cuối thành ảnh base64 với tùy chọn tiết kiệm RAM
+      // 1. Trích xuất trang đầu và trang cuối thành ảnh base64 với tùy chọn tối ưu bộ nhớ RAM
       const options = {
-        scale: lowRamMode ? 1.4 : 2.0,
-        quality: lowRamMode ? 0.7 : 0.8
+        scale: 1.5,
+        quality: 0.75
       };
       const imagesBase64 = await extractFirstAndLastPage(item.file, options);
 
