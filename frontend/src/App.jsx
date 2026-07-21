@@ -12,6 +12,27 @@ function App() {
   const [quotaChecking, setQuotaChecking] = useState(false);
   const [quotaResults, setQuotaResults] = useState(null);
 
+  const [notifPermission, setNotifPermission] = useState(() => {
+    return typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported';
+  });
+
+  const requestNotificationPermission = async () => {
+    if ('Notification' in window) {
+      const permission = await Notification.requestPermission();
+      setNotifPermission(permission);
+      if (permission === 'granted') {
+        try {
+          new Notification('PDF OCR System', {
+            body: '🔔 Thông báo Desktop đã bật thành công! Bạn sẽ nhận thông báo khi trích xuất xong.',
+            icon: '/favicon.ico'
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    }
+  };
+
   // Stats tab states
   const [activeTab, setActiveTab] = useState('ocr'); // 'ocr', 'stats', 'config'
   const [statsData, setStatsData] = useState(null);
@@ -111,17 +132,21 @@ function App() {
     if (isProcessing) {
       wasProcessingRef.current = true;
       if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission().catch(() => {});
+        Notification.requestPermission().then(p => setNotifPermission(p)).catch(() => {});
       }
     } else if (wasProcessingRef.current) {
       wasProcessingRef.current = false;
       const completedCount = dataList.filter(d => d.status === 'completed').length;
       if (completedCount > 0 && 'Notification' in window && Notification.permission === 'granted') {
         try {
-          new Notification('PDF OCR System', {
-            body: `🎉 Đã hoàn tất trích xuất OCR cho ${completedCount} văn bản!`,
-            icon: '/favicon.ico'
+          const notif = new Notification('📄 PDF OCR System - Hoàn Thành!', {
+            body: `🎉 Đã hoàn tất trích xuất OCR cho ${completedCount} văn bản PDF. Nhấp để xem kết quả!`,
+            icon: '/favicon.ico',
+            requireInteraction: true
           });
+          notif.onclick = () => {
+            window.focus();
+          };
         } catch (e) {
           console.error('Lỗi gửi thông báo:', e);
         }
@@ -521,6 +546,21 @@ function App() {
                 </button>
               ))}
             </div>
+
+            <button
+              id="btn-notif-permission"
+              onClick={requestNotificationPermission}
+              title="Nhấn để bật hoặc thử nghiệm thông báo Desktop khi hoàn thành trích xuất"
+              className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl font-bold text-xs md:text-sm border transition-all ${
+                notifPermission === 'granted'
+                  ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                  : notifPermission === 'denied'
+                  ? 'bg-rose-50 text-rose-700 border-rose-200'
+                  : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100 animate-pulse'
+              }`}
+            >
+              {notifPermission === 'granted' ? '🔔 Thông Báo: Đã Bật' : notifPermission === 'denied' ? '🔕 Thông Báo: Bị Chặn' : '🔔 Bật Thông Báo'}
+            </button>
 
             <button
               id="btn-export-excel"
